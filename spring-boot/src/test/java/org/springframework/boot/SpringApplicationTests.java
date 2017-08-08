@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@
 
 package org.springframework.boot;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,26 +30,36 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.PostConstruct;
 
+import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Condition;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.mockito.ArgumentCaptor;
+import reactor.core.publisher.Mono;
 
 import org.springframework.beans.BeansException;
+import org.springframework.beans.CachedIntrospectionResults;
+import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanNameGenerator;
 import org.springframework.beans.factory.support.DefaultBeanNameGenerator;
-import org.springframework.boot.context.embedded.AnnotationConfigEmbeddedWebApplicationContext;
-import org.springframework.boot.context.embedded.jetty.JettyEmbeddedServletContainerFactory;
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
+import org.springframework.boot.context.event.ApplicationFailedEvent;
 import org.springframework.boot.context.event.ApplicationPreparedEvent;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.boot.context.event.ApplicationStartedEvent;
-import org.springframework.boot.testutil.InternalOutputCapture;
+import org.springframework.boot.context.event.ApplicationStartingEvent;
+import org.springframework.boot.testsupport.rule.OutputCapture;
+import org.springframework.boot.web.embedded.netty.NettyReactiveWebServerFactory;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.reactive.context.ReactiveWebApplicationContext;
+import org.springframework.boot.web.reactive.context.ReactiveWebServerApplicationContext;
+import org.springframework.boot.web.servlet.context.AnnotationConfigServletWebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.ApplicationContextException;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
@@ -56,8 +68,10 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.AnnotationConfigUtils;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.event.ApplicationEventMulticaster;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.SimpleApplicationEventMulticaster;
+import org.springframework.context.support.AbstractApplicationContext;
 import org.springframework.context.support.StaticApplicationContext;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.CommandLinePropertySource;
@@ -71,19 +85,23 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.http.server.reactive.HttpHandler;
 import org.springframework.test.context.support.TestPropertySourceUtils;
+import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.context.ConfigurableWebEnvironment;
+import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.support.StandardServletEnvironment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyObject;
+import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 /**
  * Tests for {@link SpringApplication}.
@@ -95,6 +113,8 @@ import static org.mockito.Mockito.verify;
  * @author Stephane Nicoll
  * @author Jeremy Rickard
  * @author Craig Burke
+ * @author Madhura Bhave
+ * @author Brian Clozel
  */
 public class SpringApplicationTests {
 
@@ -104,7 +124,7 @@ public class SpringApplicationTests {
 	public ExpectedException thrown = ExpectedException.none();
 
 	@Rule
-	public InternalOutputCapture output = new InternalOutputCapture();
+	public OutputCapture output = new OutputCapture();
 
 	private ConfigurableApplicationContext context;
 
@@ -129,21 +149,22 @@ public class SpringApplicationTests {
 		else {
 			System.setProperty("java.awt.headless", this.headlessProperty);
 		}
-
 	}
 
 	@After
-	public void close() {
+	public void cleanUp() {
 		if (this.context != null) {
 			this.context.close();
 		}
+		System.clearProperty("spring.main.banner-mode");
+		System.clearProperty(CachedIntrospectionResults.IGNORE_BEANINFO_PROPERTY_NAME);
 	}
 
 	@Test
 	public void sourcesMustNotBeNull() throws Exception {
 		this.thrown.expect(IllegalArgumentException.class);
-		this.thrown.expectMessage("Sources must not be empty");
-		new SpringApplication((Object[]) null).run();
+		this.thrown.expectMessage("PrimarySources must not be null");
+		new SpringApplication((Class<?>[]) null).run();
 	}
 
 	@Test
@@ -161,26 +182,9 @@ public class SpringApplicationTests {
 	}
 
 	@Test
-	public void disableBannerWithMode() throws Exception {
-		SpringApplication application = spy(new SpringApplication(ExampleConfig.class));
-		application.setWebEnvironment(false);
-		application.setBannerMode(Banner.Mode.OFF);
-		this.context = application.run();
-		verify(application, never()).printBanner((Environment) anyObject());
-	}
-
-	@Test
-	public void disableBannerViaBannerModeProperty() throws Exception {
-		SpringApplication application = spy(new SpringApplication(ExampleConfig.class));
-		application.setWebEnvironment(false);
-		this.context = application.run("--spring.main.banner-mode=off");
-		verify(application, never()).printBanner((Environment) anyObject());
-	}
-
-	@Test
 	public void customBanner() throws Exception {
 		SpringApplication application = spy(new SpringApplication(ExampleConfig.class));
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--banner.location=classpath:test-banner.txt");
 		assertThat(this.output.toString()).startsWith("Running a Test!");
 	}
@@ -188,12 +192,11 @@ public class SpringApplicationTests {
 	@Test
 	public void customBannerWithProperties() throws Exception {
 		SpringApplication application = spy(new SpringApplication(ExampleConfig.class));
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run(
 				"--banner.location=classpath:test-banner-with-placeholder.txt",
 				"--test.property=123456");
-		assertThat(this.output.toString())
-				.startsWith(String.format("Running a Test!%n%n123456"));
+		assertThat(this.output.toString()).containsPattern("Running a Test!\\s+123456");
 	}
 
 	@Test
@@ -202,7 +205,7 @@ public class SpringApplicationTests {
 		MockResourceLoader resourceLoader = new MockResourceLoader();
 		resourceLoader.addResource("banner.gif", "black-and-white.gif");
 		resourceLoader.addResource("banner.txt", "foobar.txt");
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setResourceLoader(resourceLoader);
 		application.run();
 		assertThat(this.output.toString()).contains("@@@@").contains("Foo Bar");
@@ -213,7 +216,7 @@ public class SpringApplicationTests {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
 		MockResourceLoader resourceLoader = new MockResourceLoader();
 		resourceLoader.addResource("banner.gif", "black-and-white.gif");
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setResourceLoader(resourceLoader);
 		application.run();
 		assertThat(this.output.toString()).contains("@@@@@@");
@@ -222,7 +225,7 @@ public class SpringApplicationTests {
 	@Test
 	public void logsNoActiveProfiles() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(this.output.toString()).contains(
 				"No active profile set, falling back to default profiles: default");
@@ -231,7 +234,7 @@ public class SpringApplicationTests {
 	@Test
 	public void logsActiveProfiles() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--spring.profiles.active=myprofiles");
 		assertThat(this.output.toString())
 				.contains("The following profiles are active: myprofile");
@@ -240,16 +243,59 @@ public class SpringApplicationTests {
 	@Test
 	public void enableBannerInLogViaProperty() throws Exception {
 		SpringApplication application = spy(new SpringApplication(ExampleConfig.class));
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--spring.main.banner-mode=log");
 		verify(application, atLeastOnce()).setBannerMode(Banner.Mode.LOG);
-		assertThat(this.output.toString()).contains("o.s.boot.SpringApplication");
+		assertThat(this.output.toString()).contains("o.s.b.SpringApplication");
+	}
+
+	@Test
+	public void setIgnoreBeanInfoPropertyByDefault() throws Exception {
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		this.context = application.run();
+		String property = System
+				.getProperty(CachedIntrospectionResults.IGNORE_BEANINFO_PROPERTY_NAME);
+		assertThat(property).isEqualTo("true");
+	}
+
+	@Test
+	public void disableIgnoreBeanInfoProperty() throws Exception {
+		System.setProperty(CachedIntrospectionResults.IGNORE_BEANINFO_PROPERTY_NAME,
+				"false");
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		this.context = application.run();
+		String property = System
+				.getProperty(CachedIntrospectionResults.IGNORE_BEANINFO_PROPERTY_NAME);
+		assertThat(property).isEqualTo("false");
+	}
+
+	@Test
+	public void triggersConfigFileApplicationListenerBeforeBinding() throws Exception {
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		this.context = application.run("--spring.config.name=bindtoapplication");
+		Field field = ReflectionUtils.findField(SpringApplication.class, "bannerMode");
+		field.setAccessible(true);
+		assertThat((Banner.Mode) field.get(application)).isEqualTo(Banner.Mode.OFF);
+	}
+
+	@Test
+	public void bindsSystemPropertyToSpringApplication() throws Exception {
+		System.setProperty("spring.main.banner-mode", "off");
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		this.context = application.run();
+		Field field = ReflectionUtils.findField(SpringApplication.class, "bannerMode");
+		field.setAccessible(true);
+		assertThat((Banner.Mode) field.get(application)).isEqualTo(Banner.Mode.OFF);
 	}
 
 	@Test
 	public void customId() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--spring.application.name=foo");
 		assertThat(this.context.getId()).startsWith("foo");
 	}
@@ -265,15 +311,10 @@ public class SpringApplicationTests {
 	@Test
 	public void specificApplicationContextInitializer() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
-		final AtomicReference<ApplicationContext> reference = new AtomicReference<ApplicationContext>();
+		application.setWebApplicationType(WebApplicationType.NONE);
+		final AtomicReference<ApplicationContext> reference = new AtomicReference<>();
 		application.setInitializers(Arrays.asList(
-				new ApplicationContextInitializer<ConfigurableApplicationContext>() {
-					@Override
-					public void initialize(ConfigurableApplicationContext context) {
-						reference.set(context);
-					}
-				}));
+				(ApplicationContextInitializer<ConfigurableApplicationContext>) reference::set));
 		this.context = application.run("--foo=bar");
 		assertThat(this.context).isSameAs(reference.get());
 		// Custom initializers do not switch off the defaults
@@ -283,14 +324,16 @@ public class SpringApplicationTests {
 	@Test
 	public void applicationRunningEventListener() {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
-		final AtomicReference<SpringApplication> reference = new AtomicReference<SpringApplication>();
+		application.setWebApplicationType(WebApplicationType.NONE);
+		final AtomicReference<SpringApplication> reference = new AtomicReference<>();
 		class ApplicationReadyEventListener
 				implements ApplicationListener<ApplicationReadyEvent> {
+
 			@Override
 			public void onApplicationEvent(ApplicationReadyEvent event) {
 				reference.set(event.getSpringApplication());
 			}
+
 		}
 		application.addListeners(new ApplicationReadyEventListener());
 		this.context = application.run("--foo=bar");
@@ -300,13 +343,15 @@ public class SpringApplicationTests {
 	@Test
 	public void contextRefreshedEventListener() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
-		final AtomicReference<ApplicationContext> reference = new AtomicReference<ApplicationContext>();
+		application.setWebApplicationType(WebApplicationType.NONE);
+		final AtomicReference<ApplicationContext> reference = new AtomicReference<>();
 		class InitializerListener implements ApplicationListener<ContextRefreshedEvent> {
+
 			@Override
 			public void onApplicationEvent(ContextRefreshedEvent event) {
 				reference.set(event.getApplicationContext());
 			}
+
 		}
 		application.setListeners(Arrays.asList(new InitializerListener()));
 		this.context = application.run("--foo=bar");
@@ -318,19 +363,21 @@ public class SpringApplicationTests {
 	@Test
 	public void eventsOrder() {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
-		final List<ApplicationEvent> events = new ArrayList<ApplicationEvent>();
+		application.setWebApplicationType(WebApplicationType.NONE);
+		final List<ApplicationEvent> events = new ArrayList<>();
 		class ApplicationRunningEventListener
 				implements ApplicationListener<ApplicationEvent> {
+
 			@Override
 			public void onApplicationEvent(ApplicationEvent event) {
 				events.add((event));
 			}
+
 		}
 		application.addListeners(new ApplicationRunningEventListener());
 		this.context = application.run();
 		assertThat(events).hasSize(5);
-		assertThat(events.get(0)).isInstanceOf(ApplicationStartedEvent.class);
+		assertThat(events.get(0)).isInstanceOf(ApplicationStartingEvent.class);
 		assertThat(events.get(1)).isInstanceOf(ApplicationEnvironmentPreparedEvent.class);
 		assertThat(events.get(2)).isInstanceOf(ApplicationPreparedEvent.class);
 		assertThat(events.get(3)).isInstanceOf(ContextRefreshedEvent.class);
@@ -340,7 +387,7 @@ public class SpringApplicationTests {
 	@Test
 	public void defaultApplicationContext() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(this.context).isInstanceOf(AnnotationConfigApplicationContext.class);
 	}
@@ -348,17 +395,26 @@ public class SpringApplicationTests {
 	@Test
 	public void defaultApplicationContextForWeb() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleWebConfig.class);
-		application.setWebEnvironment(true);
+		application.setWebApplicationType(WebApplicationType.SERVLET);
 		this.context = application.run();
 		assertThat(this.context)
-				.isInstanceOf(AnnotationConfigEmbeddedWebApplicationContext.class);
+				.isInstanceOf(AnnotationConfigServletWebServerApplicationContext.class);
+	}
+
+	@Test
+	public void defaultApplicationContextForReactiveWeb() throws Exception {
+		SpringApplication application = new SpringApplication(
+				ExampleReactiveWebConfig.class);
+		application.setWebApplicationType(WebApplicationType.REACTIVE);
+		this.context = application.run();
+		assertThat(this.context).isInstanceOf(ReactiveWebServerApplicationContext.class);
 	}
 
 	@Test
 	public void customEnvironment() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
 		this.context = application.run();
@@ -369,7 +425,7 @@ public class SpringApplicationTests {
 	public void customResourceLoader() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ResourceLoader resourceLoader = new DefaultResourceLoader();
 		application.setResourceLoader(resourceLoader);
 		this.context = application.run();
@@ -393,15 +449,29 @@ public class SpringApplicationTests {
 		application.setBeanNameGenerator(beanNameGenerator);
 		this.context = application.run();
 		verify(application.getLoader()).setBeanNameGenerator(beanNameGenerator);
-		Object bean = this.context
+		Object actualGenerator = this.context
 				.getBean(AnnotationConfigUtils.CONFIGURATION_BEAN_NAME_GENERATOR);
-		assertThat(bean).isSameAs(beanNameGenerator);
+		assertThat(actualGenerator).isSameAs(beanNameGenerator);
+	}
+
+	@Test
+	public void customBeanNameGeneratorWithNonWebApplication() throws Exception {
+		TestSpringApplication application = new TestSpringApplication(
+				ExampleWebConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		BeanNameGenerator beanNameGenerator = new DefaultBeanNameGenerator();
+		application.setBeanNameGenerator(beanNameGenerator);
+		this.context = application.run();
+		verify(application.getLoader()).setBeanNameGenerator(beanNameGenerator);
+		Object actualGenerator = this.context
+				.getBean(AnnotationConfigUtils.CONFIGURATION_BEAN_NAME_GENERATOR);
+		assertThat(actualGenerator).isSameAs(beanNameGenerator);
 	}
 
 	@Test
 	public void commandLinePropertySource() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
 		this.context = application.run("--foo=bar");
@@ -412,7 +482,7 @@ public class SpringApplicationTests {
 	@Test
 	public void commandLinePropertySourceEnhancesEnvironment() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		environment.getPropertySources().addFirst(new MapPropertySource("commandLineArgs",
 				Collections.<String, Object>singletonMap("foo", "original")));
@@ -423,12 +493,21 @@ public class SpringApplicationTests {
 		assertThat(environment.getProperty("bar")).isEqualTo("foo");
 		// New command line properties take precedence
 		assertThat(environment.getProperty("foo")).isEqualTo("bar");
+		CompositePropertySource composite = (CompositePropertySource) environment
+				.getPropertySources().get("commandLineArgs");
+		assertThat(composite.getPropertySources()).hasSize(2);
+		assertThat(composite.getPropertySources()).first().matches(
+				(source) -> source.getName().equals("springApplicationCommandLineArgs"),
+				"is named springApplicationCommandLineArgs");
+		assertThat(composite.getPropertySources()).element(1).matches(
+				(source) -> source.getName().equals("commandLineArgs"),
+				"is named commandLineArgs");
 	}
 
 	@Test
 	public void propertiesFileEnhancesEnvironment() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
 		this.context = application.run();
@@ -438,7 +517,7 @@ public class SpringApplicationTests {
 	@Test
 	public void addProfiles() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setAdditionalProfiles("foo");
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
@@ -449,7 +528,7 @@ public class SpringApplicationTests {
 	@Test
 	public void addProfilesOrder() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setAdditionalProfiles("foo");
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
@@ -461,7 +540,7 @@ public class SpringApplicationTests {
 	@Test
 	public void addProfilesOrderWithProperties() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setAdditionalProfiles("other");
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
@@ -474,7 +553,7 @@ public class SpringApplicationTests {
 	@Test
 	public void emptyCommandLinePropertySourceNotAdded() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
 		this.context = application.run();
@@ -484,7 +563,7 @@ public class SpringApplicationTests {
 	@Test
 	public void disableCommandLinePropertySource() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setAddCommandLineProperties(false);
 		ConfigurableEnvironment environment = new StandardEnvironment();
 		application.setEnvironment(environment);
@@ -496,7 +575,7 @@ public class SpringApplicationTests {
 	@Test
 	public void runCommandLineRunnersAndApplicationRunners() throws Exception {
 		SpringApplication application = new SpringApplication(CommandLineRunConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("arg");
 		assertThat(this.context).has(runTestRunnerBean("runnerA"));
 		assertThat(this.context).has(runTestRunnerBean("runnerB"));
@@ -505,21 +584,23 @@ public class SpringApplicationTests {
 
 	@Test
 	public void loadSources() throws Exception {
-		Object[] sources = { ExampleConfig.class, "a", TestCommandLineRunner.class };
+		Class<?>[] sources = { ExampleConfig.class, TestCommandLineRunner.class };
 		TestSpringApplication application = new TestSpringApplication(sources);
-		application.setWebEnvironment(false);
+		application.getSources().add("a");
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setUseMockLoader(true);
 		this.context = application.run();
-		Set<Object> initialSources = application.getSources();
-		assertThat(initialSources.toArray()).isEqualTo(sources);
+		Set<Object> allSources = application.getAllSources();
+		assertThat(allSources).contains(ExampleConfig.class, TestCommandLineRunner.class,
+				"a");
 	}
 
 	@Test
 	public void wildcardSources() {
-		Object[] sources = {
-				"classpath:org/springframework/boot/sample-${sample.app.test.prop}.xml" };
-		TestSpringApplication application = new TestSpringApplication(sources);
-		application.setWebEnvironment(false);
+		TestSpringApplication application = new TestSpringApplication();
+		application.getSources().add(
+				"classpath:org/springframework/boot/sample-${sample.app.test.prop}.xml");
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 	}
 
@@ -532,14 +613,14 @@ public class SpringApplicationTests {
 	@Test
 	public void runComponents() throws Exception {
 		this.context = SpringApplication.run(
-				new Object[] { ExampleWebConfig.class, Object.class }, new String[0]);
+				new Class<?>[] { ExampleWebConfig.class, Object.class }, new String[0]);
 		assertThat(this.context).isNotNull();
 	}
 
 	@Test
 	public void exit() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(this.context).isNotNull();
 		assertThat(SpringApplication.exit(this.context)).isEqualTo(0);
@@ -550,17 +631,11 @@ public class SpringApplicationTests {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
 		ExitCodeListener listener = new ExitCodeListener();
 		application.addListeners(listener);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(this.context).isNotNull();
-		assertThat(SpringApplication.exit(this.context, new ExitCodeGenerator() {
-
-			@Override
-			public int getExitCode() {
-				return 2;
-			}
-
-		})).isEqualTo(2);
+		assertThat(SpringApplication.exit(this.context, (ExitCodeGenerator) () -> 2))
+				.isEqualTo(2);
 		assertThat(listener.getExitCode()).isEqualTo(2);
 	}
 
@@ -578,7 +653,7 @@ public class SpringApplicationTests {
 		};
 		ExitCodeListener listener = new ExitCodeListener();
 		application.addListeners(listener);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		try {
 			application.run();
 			fail("Did not throw");
@@ -603,7 +678,7 @@ public class SpringApplicationTests {
 		};
 		ExitCodeListener listener = new ExitCodeListener();
 		application.addListeners(listener);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		try {
 			application.run();
 			fail("Did not throw");
@@ -628,14 +703,18 @@ public class SpringApplicationTests {
 		};
 		ExitCodeListener listener = new ExitCodeListener();
 		application.addListeners(listener);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		try {
 			application.run();
 			fail("Did not throw");
 		}
 		catch (RuntimeException ex) {
 		}
-		verify(handler).registerLoggedException(any(RefreshFailureException.class));
+		ArgumentCaptor<RuntimeException> exceptionCaptor = ArgumentCaptor
+				.forClass(RuntimeException.class);
+		verify(handler).registerLoggedException(exceptionCaptor.capture());
+		assertThat(exceptionCaptor.getValue())
+				.hasCauseInstanceOf(RefreshFailureException.class);
 		assertThat(this.output.toString()).doesNotContain("NullPointerException");
 	}
 
@@ -644,7 +723,7 @@ public class SpringApplicationTests {
 		SpringApplication application = new SpringApplication(ExampleConfig.class);
 		application.setDefaultProperties(StringUtils.splitArrayElementsIntoProperties(
 				new String[] { "baz=", "bar=spam" }, "="));
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--bar=foo", "bucket", "crap");
 		assertThat(this.context).isInstanceOf(AnnotationConfigApplicationContext.class);
 		assertThat(getEnvironment().getProperty("bar")).isEqualTo("foo");
@@ -655,7 +734,7 @@ public class SpringApplicationTests {
 	public void commandLineArgsApplyToSpringApplication() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--spring.main.banner-mode=OFF");
 		assertThat(application.getBannerMode()).isEqualTo(Banner.Mode.OFF);
 	}
@@ -671,35 +750,116 @@ public class SpringApplicationTests {
 
 	@Test
 	public void registerListener() throws Exception {
-		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		SpringApplication application = new SpringApplication(ExampleConfig.class,
+				ListenerConfig.class);
 		application.setApplicationContextClass(SpyApplicationContext.class);
-		final LinkedHashSet<ApplicationEvent> events = new LinkedHashSet<ApplicationEvent>();
-		application.addListeners(new ApplicationListener<ApplicationEvent>() {
-			@Override
-			public void onApplicationEvent(ApplicationEvent event) {
-				events.add(event);
-			}
-		});
+		final LinkedHashSet<ApplicationEvent> events = new LinkedHashSet<>();
+		application.addListeners((ApplicationListener<ApplicationEvent>) events::add);
 		this.context = application.run();
 		assertThat(events).hasAtLeastOneElementOfType(ApplicationPreparedEvent.class);
 		assertThat(events).hasAtLeastOneElementOfType(ContextRefreshedEvent.class);
+		verifyTestListenerEvents();
 	}
 
 	@Test
 	public void registerListenerWithCustomMulticaster() throws Exception {
 		SpringApplication application = new SpringApplication(ExampleConfig.class,
-				Multicaster.class);
+				ListenerConfig.class, Multicaster.class);
 		application.setApplicationContextClass(SpyApplicationContext.class);
-		final LinkedHashSet<ApplicationEvent> events = new LinkedHashSet<ApplicationEvent>();
-		application.addListeners(new ApplicationListener<ApplicationEvent>() {
-			@Override
-			public void onApplicationEvent(ApplicationEvent event) {
-				events.add(event);
-			}
-		});
+		final LinkedHashSet<ApplicationEvent> events = new LinkedHashSet<>();
+		application.addListeners((ApplicationListener<ApplicationEvent>) events::add);
 		this.context = application.run();
 		assertThat(events).hasAtLeastOneElementOfType(ApplicationPreparedEvent.class);
 		assertThat(events).hasAtLeastOneElementOfType(ContextRefreshedEvent.class);
+		verifyTestListenerEvents();
+	}
+
+	@SuppressWarnings("unchecked")
+	private void verifyTestListenerEvents() {
+		ApplicationListener<ApplicationEvent> listener = this.context
+				.getBean("testApplicationListener", ApplicationListener.class);
+		verifyListenerEvents(listener, ContextRefreshedEvent.class,
+				ApplicationReadyEvent.class);
+	}
+
+	@SuppressWarnings("unchecked")
+	private void verifyListenerEvents(ApplicationListener<ApplicationEvent> listener,
+			Class<? extends ApplicationEvent>... eventTypes) {
+		for (Class<? extends ApplicationEvent> eventType : eventTypes) {
+			verify(listener).onApplicationEvent(isA(eventType));
+		}
+		verifyNoMoreInteractions(listener);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void applicationListenerFromApplicationIsCalledWhenContextFailsRefreshBeforeListenerRegistration() {
+		ApplicationListener<ApplicationEvent> listener = mock(ApplicationListener.class);
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.addListeners(listener);
+		try {
+			application.run();
+			fail("Run should have failed with an ApplicationContextException");
+		}
+		catch (ApplicationContextException ex) {
+			verifyListenerEvents(listener, ApplicationStartingEvent.class,
+					ApplicationEnvironmentPreparedEvent.class,
+					ApplicationPreparedEvent.class, ApplicationFailedEvent.class);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void applicationListenerFromApplicationIsCalledWhenContextFailsRefreshAfterListenerRegistration() {
+		ApplicationListener<ApplicationEvent> listener = mock(ApplicationListener.class);
+		SpringApplication application = new SpringApplication(
+				BrokenPostConstructConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		application.addListeners(listener);
+		try {
+			application.run();
+			fail("Run should have failed with a BeanCreationException");
+		}
+		catch (BeanCreationException ex) {
+			verifyListenerEvents(listener, ApplicationStartingEvent.class,
+					ApplicationEnvironmentPreparedEvent.class,
+					ApplicationPreparedEvent.class, ApplicationFailedEvent.class);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void applicationListenerFromContextIsCalledWhenContextFailsRefreshBeforeListenerRegistration() {
+		final ApplicationListener<ApplicationEvent> listener = mock(
+				ApplicationListener.class);
+		SpringApplication application = new SpringApplication(ExampleConfig.class);
+		application.addInitializers((applicationContext) -> applicationContext
+				.addApplicationListener(listener));
+		try {
+			application.run();
+			fail("Run should have failed with an ApplicationContextException");
+		}
+		catch (ApplicationContextException ex) {
+			verifyListenerEvents(listener, ApplicationFailedEvent.class);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void applicationListenerFromContextIsCalledWhenContextFailsRefreshAfterListenerRegistration() {
+		ApplicationListener<ApplicationEvent> listener = mock(ApplicationListener.class);
+		SpringApplication application = new SpringApplication(
+				BrokenPostConstructConfig.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		application.addInitializers((applicationContext) -> applicationContext
+				.addApplicationListener(listener));
+		try {
+			application.run();
+			fail("Run should have failed with a BeanCreationException");
+		}
+		catch (BeanCreationException ex) {
+			verifyListenerEvents(listener, ApplicationFailedEvent.class);
+		}
 	}
 
 	@Test
@@ -717,7 +877,7 @@ public class SpringApplicationTests {
 	public void headless() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(System.getProperty("java.awt.headless")).isEqualTo("true");
 	}
@@ -726,7 +886,7 @@ public class SpringApplicationTests {
 	public void headlessFalse() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		application.setHeadless(false);
 		this.context = application.run();
 		assertThat(System.getProperty("java.awt.headless")).isEqualTo("false");
@@ -737,7 +897,7 @@ public class SpringApplicationTests {
 		System.setProperty("java.awt.headless", "false");
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run();
 		assertThat(System.getProperty("java.awt.headless")).isEqualTo("false");
 	}
@@ -746,7 +906,7 @@ public class SpringApplicationTests {
 	public void getApplicationArgumentsBean() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
-		application.setWebEnvironment(false);
+		application.setWebApplicationType(WebApplicationType.NONE);
 		this.context = application.run("--debug", "spring", "boot");
 		ApplicationArguments args = this.context.getBean(ApplicationArguments.class);
 		assertThat(args.getNonOptionArgs()).containsExactly("spring", "boot");
@@ -754,30 +914,37 @@ public class SpringApplicationTests {
 	}
 
 	@Test
-	public void webEnvironmentSwitchedOffInListener() throws Exception {
+	public void webApplicationSwitchedOffInListener() throws Exception {
 		TestSpringApplication application = new TestSpringApplication(
 				ExampleConfig.class);
 		application.addListeners(
-				new ApplicationListener<ApplicationEnvironmentPreparedEvent>() {
-
-					@Override
-					public void onApplicationEvent(
-							ApplicationEnvironmentPreparedEvent event) {
-						assertThat(event.getEnvironment())
-								.isInstanceOf(StandardServletEnvironment.class);
-						TestPropertySourceUtils.addInlinedPropertiesToEnvironment(
-								event.getEnvironment(), "foo=bar");
-						event.getSpringApplication().setWebEnvironment(false);
-					}
-
+				(ApplicationListener<ApplicationEnvironmentPreparedEvent>) (event) -> {
+					Assertions.assertThat(event.getEnvironment())
+							.isInstanceOf(StandardServletEnvironment.class);
+					TestPropertySourceUtils.addInlinedPropertiesToEnvironment(
+							event.getEnvironment(), "foo=bar");
+					event.getSpringApplication()
+							.setWebApplicationType(WebApplicationType.NONE);
 				});
 		this.context = application.run();
 		assertThat(this.context.getEnvironment())
 				.isNotInstanceOf(StandardServletEnvironment.class);
-		assertThat(this.context.getEnvironment().getProperty("foo"));
-		assertThat(this.context.getEnvironment().getPropertySources().iterator().next()
-				.getName()).isEqualTo(
-						TestPropertySourceUtils.INLINED_PROPERTIES_PROPERTY_SOURCE_NAME);
+		assertThat(this.context.getEnvironment().getProperty("foo")).isEqualTo("bar");
+		Iterator<PropertySource<?>> iterator = this.context.getEnvironment()
+				.getPropertySources().iterator();
+		assertThat(iterator.next().getName()).isEqualTo("configurationProperties");
+		assertThat(iterator.next().getName()).isEqualTo(
+				TestPropertySourceUtils.INLINED_PROPERTIES_PROPERTY_SOURCE_NAME);
+	}
+
+	@Test
+	public void nonWebApplicationConfiguredViaAPropertyHasTheCorrectTypeOfContextAndEnvironment() {
+		ConfigurableApplicationContext context = new SpringApplication(
+				ExampleConfig.class).run("--spring.main.web-application-type=NONE");
+		assertThat(context).isNotInstanceOfAny(WebApplicationContext.class,
+				ReactiveWebApplicationContext.class);
+		assertThat(context.getEnvironment())
+				.isNotInstanceOfAny(ConfigurableWebEnvironment.class);
 	}
 
 	@Test
@@ -788,7 +955,7 @@ public class SpringApplicationTests {
 			public void run() {
 				SpringApplication application = new SpringApplication(
 						FailingConfig.class);
-				application.setWebEnvironment(false);
+				application.setWebApplicationType(WebApplicationType.NONE);
 				application.run();
 			};
 		};
@@ -866,12 +1033,12 @@ public class SpringApplicationTests {
 
 		private Banner.Mode bannerMode;
 
-		TestSpringApplication(Object... sources) {
-			super(sources);
+		TestSpringApplication(Class<?>... primarySources) {
+			super(primarySources);
 		}
 
-		TestSpringApplication(ResourceLoader resourceLoader, Object... sources) {
-			super(resourceLoader, sources);
+		TestSpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
+			super(resourceLoader, primarySources);
 		}
 
 		public void setUseMockLoader(boolean useMockLoader) {
@@ -912,11 +1079,40 @@ public class SpringApplicationTests {
 	}
 
 	@Configuration
-	static class Multicaster {
+	static class BrokenPostConstructConfig {
 
 		@Bean
-		public SimpleApplicationEventMulticaster applicationEventMulticaster() {
-			return new SimpleApplicationEventMulticaster();
+		public Thing thing() {
+			return new Thing();
+		}
+
+		static class Thing {
+
+			@PostConstruct
+			public void boom() {
+				throw new IllegalStateException();
+			}
+
+		}
+
+	}
+
+	@Configuration
+	static class ListenerConfig {
+
+		@Bean
+		public ApplicationListener<?> testApplicationListener() {
+			return mock(ApplicationListener.class);
+		}
+
+	}
+
+	@Configuration
+	static class Multicaster {
+
+		@Bean(name = AbstractApplicationContext.APPLICATION_EVENT_MULTICASTER_BEAN_NAME)
+		public ApplicationEventMulticaster applicationEventMulticaster() {
+			return spy(new SimpleApplicationEventMulticaster());
 		}
 
 	}
@@ -925,8 +1121,23 @@ public class SpringApplicationTests {
 	static class ExampleWebConfig {
 
 		@Bean
-		public JettyEmbeddedServletContainerFactory container() {
-			return new JettyEmbeddedServletContainerFactory(0);
+		public TomcatServletWebServerFactory webServer() {
+			return new TomcatServletWebServerFactory(0);
+		}
+
+	}
+
+	@Configuration
+	static class ExampleReactiveWebConfig {
+
+		@Bean
+		public NettyReactiveWebServerFactory webServerFactory() {
+			return new NettyReactiveWebServerFactory(0);
+		}
+
+		@Bean
+		public HttpHandler httpHandler() {
+			return (serverHttpRequest, serverHttpResponse) -> Mono.empty();
 		}
 
 	}
@@ -967,13 +1178,8 @@ public class SpringApplicationTests {
 
 		@Bean
 		public CommandLineRunner runner() {
-			return new CommandLineRunner() {
-
-				@Override
-				public void run(String... args) throws Exception {
-					throw new IllegalStateException(new ExitStatusException());
-				}
-
+			return (args) -> {
+				throw new IllegalStateException(new ExitStatusException());
 			};
 		}
 
@@ -984,28 +1190,18 @@ public class SpringApplicationTests {
 
 		@Bean
 		public CommandLineRunner runner() {
-			return new CommandLineRunner() {
-
-				@Override
-				public void run(String... args) throws Exception {
-					throw new IllegalStateException();
-				}
-
+			return (args) -> {
+				throw new IllegalStateException();
 			};
 		}
 
 		@Bean
 		public ExitCodeExceptionMapper exceptionMapper() {
-			return new ExitCodeExceptionMapper() {
-
-				@Override
-				public int getExitCode(Throwable exception) {
-					if (exception instanceof IllegalStateException) {
-						return 11;
-					}
-					return 0;
+			return (exception) -> {
+				if (exception instanceof IllegalStateException) {
+					return 11;
 				}
-
+				return 0;
 			};
 		}
 
@@ -1018,6 +1214,7 @@ public class SpringApplicationTests {
 		public void fail() {
 			throw new RefreshFailureException();
 		}
+
 	}
 
 	static class ExitStatusException extends RuntimeException
@@ -1120,7 +1317,7 @@ public class SpringApplicationTests {
 
 	private static class MockResourceLoader implements ResourceLoader {
 
-		private final Map<String, Resource> resources = new HashMap<String, Resource>();
+		private final Map<String, Resource> resources = new HashMap<>();
 
 		public void addResource(String source, String path) {
 			this.resources.put(source, new ClassPathResource(path, getClass()));
@@ -1129,7 +1326,7 @@ public class SpringApplicationTests {
 		@Override
 		public Resource getResource(String path) {
 			Resource resource = this.resources.get(path);
-			return (resource == null ? new ClassPathResource("doesnotexit") : resource);
+			return (resource == null ? new ClassPathResource("doesnotexist") : resource);
 		}
 
 		@Override

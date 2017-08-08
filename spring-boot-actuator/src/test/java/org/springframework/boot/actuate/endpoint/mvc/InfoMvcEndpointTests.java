@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,18 +25,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.autoconfigure.AuditAutoConfiguration;
 import org.springframework.boot.actuate.autoconfigure.EndpointWebMvcAutoConfiguration;
-import org.springframework.boot.actuate.autoconfigure.ManagementServerPropertiesAutoConfiguration;
 import org.springframework.boot.actuate.endpoint.InfoEndpoint;
-import org.springframework.boot.actuate.info.Info;
 import org.springframework.boot.actuate.info.InfoContributor;
+import org.springframework.boot.autoconfigure.http.HttpMessageConvertersAutoConfiguration;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.HttpMessageConvertersAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.WebMvcAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.web.servlet.MockMvc;
@@ -46,6 +47,7 @@ import org.springframework.web.context.WebApplicationContext;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -56,7 +58,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @RunWith(SpringRunner.class)
 @SpringBootTest
-@TestPropertySource(properties = { "info.app.name=MyService" })
+@TestPropertySource(properties = { "info.app.name=MyService",
+		"management.security.enabled=false" })
 public class InfoMvcEndpointTests {
 
 	@Autowired
@@ -72,17 +75,31 @@ public class InfoMvcEndpointTests {
 
 	@Test
 	public void home() throws Exception {
-		this.mvc.perform(get("/info")).andExpect(status().isOk())
+		this.mvc.perform(get("/application/info")).andExpect(status().isOk())
 				.andExpect(content().string(containsString(
 						"\"beanName1\":{\"key11\":\"value11\",\"key12\":\"value12\"}")))
 				.andExpect(content().string(containsString(
 						"\"beanName2\":{\"key21\":\"value21\",\"key22\":\"value22\"}")));
 	}
 
-	@Import({ JacksonAutoConfiguration.class,
+	@Test
+	public void contentTypeDefaultsToActuatorV2Json() throws Exception {
+		this.mvc.perform(get("/application/info")).andExpect(status().isOk())
+				.andExpect(header().string("Content-Type",
+						"application/vnd.spring-boot.actuator.v2+json;charset=UTF-8"));
+	}
+
+	@Test
+	public void contentTypeCanBeApplicationJson() throws Exception {
+		this.mvc.perform(get("/application/info").header(HttpHeaders.ACCEPT,
+				MediaType.APPLICATION_JSON_VALUE)).andExpect(status().isOk())
+				.andExpect(header().string("Content-Type",
+						MediaType.APPLICATION_JSON_UTF8_VALUE));
+	}
+
+	@Import({ JacksonAutoConfiguration.class, AuditAutoConfiguration.class,
 			HttpMessageConvertersAutoConfiguration.class,
-			EndpointWebMvcAutoConfiguration.class, WebMvcAutoConfiguration.class,
-			ManagementServerPropertiesAutoConfiguration.class })
+			EndpointWebMvcAutoConfiguration.class, WebMvcAutoConfiguration.class })
 	@Configuration
 	public static class TestConfiguration {
 
@@ -93,28 +110,21 @@ public class InfoMvcEndpointTests {
 
 		@Bean
 		public InfoContributor beanName1() {
-			return new InfoContributor() {
-
-				@Override
-				public void contribute(Info.Builder builder) {
-					Map<String, Object> content = new LinkedHashMap<String, Object>();
-					content.put("key11", "value11");
-					content.put("key12", "value12");
-					builder.withDetail("beanName1", content);
-				}
+			return (builder) -> {
+				Map<String, Object> content = new LinkedHashMap<>();
+				content.put("key11", "value11");
+				content.put("key12", "value12");
+				builder.withDetail("beanName1", content);
 			};
 		}
 
 		@Bean
 		public InfoContributor beanName2() {
-			return new InfoContributor() {
-				@Override
-				public void contribute(Info.Builder builder) {
-					Map<String, Object> content = new LinkedHashMap<String, Object>();
-					content.put("key21", "value21");
-					content.put("key22", "value22");
-					builder.withDetail("beanName2", content);
-				}
+			return (builder) -> {
+				Map<String, Object> content = new LinkedHashMap<>();
+				content.put("key21", "value21");
+				content.put("key22", "value22");
+				builder.withDetail("beanName2", content);
 			};
 		}
 

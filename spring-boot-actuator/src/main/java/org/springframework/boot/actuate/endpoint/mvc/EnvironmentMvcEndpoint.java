@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,10 +25,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.PropertySources;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
@@ -49,9 +46,8 @@ public class EnvironmentMvcEndpoint extends EndpointMvcAdapter
 		super(delegate);
 	}
 
-	@RequestMapping(value = "/{name:.*}", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
+	@ActuatorGetMapping("/{name:.*}")
 	@ResponseBody
-	@HypermediaDisabled
 	public Object value(@PathVariable String name) {
 		if (!getDelegate().isEnabled()) {
 			// Shouldn't happen - MVC endpoint shouldn't be registered when delegate's
@@ -96,7 +92,7 @@ public class EnvironmentMvcEndpoint extends EndpointMvcAdapter
 
 		@Override
 		protected Object getOptionalValue(Environment source, String name) {
-			Object result = source.getProperty(name);
+			Object result = getValue(name);
 			if (result != null) {
 				result = ((EnvironmentEndpoint) getDelegate()).sanitize(name, result);
 			}
@@ -105,11 +101,16 @@ public class EnvironmentMvcEndpoint extends EndpointMvcAdapter
 
 		@Override
 		protected Object getValue(Environment source, String name) {
-			String result = source.getProperty(name);
+			Object result = getValue(name);
 			if (result == null) {
 				throw new NoSuchPropertyException("No such property: " + name);
 			}
 			return ((EnvironmentEndpoint) getDelegate()).sanitize(name, result);
+		}
+
+		private Object getValue(String name) {
+			return ((EnvironmentEndpoint) getDelegate()).getResolver().getProperty(name,
+					Object.class);
 		}
 
 	}

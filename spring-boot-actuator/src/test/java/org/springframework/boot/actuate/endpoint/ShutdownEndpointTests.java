@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 
 package org.springframework.boot.actuate.endpoint;
 
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -34,12 +37,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * @author Phillip Webb
  * @author Dave Syer
+ * @author Andy Wilkinson
  */
 public class ShutdownEndpointTests extends AbstractEndpointTests<ShutdownEndpoint> {
 
 	public ShutdownEndpointTests() {
-		super(Config.class, ShutdownEndpoint.class, "shutdown", true,
-				"endpoints.shutdown");
+		super(Config.class, ShutdownEndpoint.class, "shutdown", "endpoints.shutdown");
 	}
 
 	@Override
@@ -50,18 +53,31 @@ public class ShutdownEndpointTests extends AbstractEndpointTests<ShutdownEndpoin
 
 	@Test
 	public void invoke() throws Exception {
-		CountDownLatch latch = this.context.getBean(Config.class).latch;
-		assertThat((String) getEndpointBean().invoke().get("message"))
-				.startsWith("Shutting down");
+		Config config = this.context.getBean(Config.class);
+		ClassLoader previousTccl = Thread.currentThread().getContextClassLoader();
+		Map<String, Object> result;
+		Thread.currentThread().setContextClassLoader(
+				new URLClassLoader(new URL[0], getClass().getClassLoader()));
+		try {
+			result = getEndpointBean().invoke();
+		}
+		finally {
+			Thread.currentThread().setContextClassLoader(previousTccl);
+		}
+		assertThat((String) result.get("message")).startsWith("Shutting down");
 		assertThat(this.context.isActive()).isTrue();
-		assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+		assertThat(config.latch.await(10, TimeUnit.SECONDS)).isTrue();
+		assertThat(config.threadContextClassLoader)
+				.isEqualTo(getClass().getClassLoader());
 	}
 
 	@Configuration
 	@EnableConfigurationProperties
 	public static class Config {
 
-		private CountDownLatch latch = new CountDownLatch(1);
+		private final CountDownLatch latch = new CountDownLatch(1);
+
+		private volatile ClassLoader threadContextClassLoader;
 
 		@Bean
 		public ShutdownEndpoint endpoint() {
@@ -71,14 +87,14 @@ public class ShutdownEndpointTests extends AbstractEndpointTests<ShutdownEndpoin
 
 		@Bean
 		public ApplicationListener<ContextClosedEvent> listener() {
-			return new ApplicationListener<ContextClosedEvent>() {
-				@Override
-				public void onApplicationEvent(ContextClosedEvent event) {
-					Config.this.latch.countDown();
-				}
+			return (event) -> {
+				this.threadContextClassLoader = Thread.currentThread()
+						.getContextClassLoader();
+				this.latch.countDown();
 			};
 
 		}
 
 	}
+
 }

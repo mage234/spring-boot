@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @author Wallace Wadge
  * @author Phillip Webb
+ * @author Venil Noronha
+ * @author Madhura Bhave
  * @since 1.3.0
  */
 @ConfigurationProperties(prefix = "management.trace")
@@ -36,17 +38,20 @@ public class TraceProperties {
 	private static final Set<Include> DEFAULT_INCLUDES;
 
 	static {
-		Set<Include> defaultIncludes = new LinkedHashSet<Include>();
+		Set<Include> defaultIncludes = new LinkedHashSet<>();
 		defaultIncludes.add(Include.REQUEST_HEADERS);
 		defaultIncludes.add(Include.RESPONSE_HEADERS);
+		defaultIncludes.add(Include.COOKIES);
 		defaultIncludes.add(Include.ERRORS);
+		defaultIncludes.add(Include.TIME_TAKEN);
 		DEFAULT_INCLUDES = Collections.unmodifiableSet(defaultIncludes);
 	}
 
 	/**
-	 * Items to be included in the trace. Defaults to request/response headers and errors.
+	 * Items to be included in the trace. Defaults to request/response headers (including
+	 * cookies) and errors.
 	 */
-	private Set<Include> include = new HashSet<Include>(DEFAULT_INCLUDES);
+	private Set<Include> include = new HashSet<>(DEFAULT_INCLUDES);
 
 	public Set<Include> getInclude() {
 		return this.include;
@@ -70,6 +75,16 @@ public class TraceProperties {
 		 * Include response headers.
 		 */
 		RESPONSE_HEADERS,
+
+		/**
+		 * Include "Cookie" in request and "Set-Cookie" in response headers.
+		 */
+		COOKIES,
+
+		/**
+		 * Include authorization header (if any).
+		 */
+		AUTHORIZATION_HEADER,
 
 		/**
 		 * Include errors (if any).
@@ -125,6 +140,11 @@ public class TraceProperties {
 		 * Include the remote user.
 		 */
 		REMOTE_USER,
+
+		/**
+		 * Include the time taken to service the request in milliseconds.
+		 */
+		TIME_TAKEN
 
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 
 package org.springframework.boot.autoconfigure.condition;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.context.annotation.Condition;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -27,16 +30,26 @@ import org.springframework.core.annotation.Order;
  * <pre class="code">
  * static class OnJndiOrProperty extends AnyNestedCondition {
  *
+ *    OnJndiOrProperty() {
+ *        super(ConfigurationPhase.PARSE_CONFIGURATION);
+ *    }
+ *
  *    &#064;ConditionalOnJndi()
  *    static class OnJndi {
  *    }
-
+ *
  *    &#064;ConditionalOnProperty("something")
  *    static class OnProperty {
  *    }
  *
  * }
  * </pre>
+ * <p>
+ * The
+ * {@link org.springframework.context.annotation.ConfigurationCondition.ConfigurationPhase
+ * ConfigurationPhase} should be specified according to the conditions that are defined.
+ * In the example above, all conditions are static and can be evaluated early so
+ * {@code PARSE_CONFIGURATION} is a right fit.
  *
  * @author Phillip Webb
  * @since 1.2.0
@@ -50,11 +63,15 @@ public abstract class AnyNestedCondition extends AbstractNestedCondition {
 
 	@Override
 	protected ConditionOutcome getFinalMatchOutcome(MemberMatchOutcomes memberOutcomes) {
-		return new ConditionOutcome(!memberOutcomes.getMatches().isEmpty(),
-				"nested any match resulted in " + memberOutcomes.getMatches()
-						+ " matches and " + memberOutcomes.getNonMatches()
-						+ " non matches");
-
+		boolean match = !memberOutcomes.getMatches().isEmpty();
+		List<ConditionMessage> messages = new ArrayList<>();
+		messages.add(ConditionMessage.forCondition("AnyNestedCondition")
+				.because(memberOutcomes.getMatches().size() + " matched "
+						+ memberOutcomes.getNonMatches().size() + " did not"));
+		for (ConditionOutcome outcome : memberOutcomes.getAll()) {
+			messages.add(outcome.getConditionMessage());
+		}
+		return new ConditionOutcome(match, ConditionMessage.of(messages));
 	}
 
 }

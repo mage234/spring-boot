@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,17 @@
 
 package org.springframework.boot.actuate.endpoint;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Test;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,7 +43,7 @@ public class ConfigurationPropertiesReportEndpointTests
 
 	public ConfigurationPropertiesReportEndpointTests() {
 		super(Config.class, ConfigurationPropertiesReportEndpoint.class, "configprops",
-				true, "endpoints.configprops");
+				"endpoints.configprops");
 	}
 
 	@Test
@@ -58,6 +61,18 @@ public class ConfigurationPropertiesReportEndpointTests
 		assertThat(nestedProperties).isNotNull();
 		assertThat(nestedProperties.get("prefix")).isEqualTo("test");
 		assertThat(nestedProperties.get("properties")).isNotNull();
+
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	public void entriesWithNullValuesAreNotIncluded() {
+		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
+		Map<String, Object> properties = report.invoke();
+		Map<String, Object> nestedProperties = (Map<String, Object>) properties
+				.get("testProperties");
+		assertThat((Map<String, Object>) nestedProperties.get("properties"))
+				.doesNotContainKey("nullValue");
 	}
 
 	@Test
@@ -85,6 +100,19 @@ public class ConfigurationPropertiesReportEndpointTests
 		assertThat(nestedProperties.get("myTestProperty")).isEqualTo("******");
 	}
 
+	@Test
+	@SuppressWarnings("unchecked")
+	public void testKeySanitizationWithList() throws Exception {
+		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
+		report.setKeysToSanitize("property");
+		Map<String, Object> properties = report.invoke();
+		Map<String, Object> nestedProperties = (Map<String, Object>) ((Map<String, Object>) properties
+				.get("testProperties")).get("properties");
+		assertThat(nestedProperties).isNotNull();
+		assertThat(nestedProperties.get("dbPassword")).isEqualTo("123456");
+		assertThat(nestedProperties.get("myTestProperty")).isEqualTo("******");
+	}
+
 	@SuppressWarnings("unchecked")
 	@Test
 	public void testKeySanitizationWithCustomPattern() throws Exception {
@@ -102,8 +130,8 @@ public class ConfigurationPropertiesReportEndpointTests
 	@Test
 	public void testKeySanitizationWithCustomKeysByEnvironment() throws Exception {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"endpoints.configprops.keys-to-sanitize:property");
+		TestPropertyValues.of("endpoints.configprops.keys-to-sanitize:property")
+				.applyTo(this.context);
 		this.context.register(Config.class);
 		this.context.refresh();
 		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
@@ -119,8 +147,8 @@ public class ConfigurationPropertiesReportEndpointTests
 	@Test
 	public void testKeySanitizationWithCustomPatternByEnvironment() throws Exception {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"endpoints.configprops.keys-to-sanitize: .*pass.*");
+		TestPropertyValues.of("endpoints.configprops.keys-to-sanitize: .*pass.*")
+				.applyTo(this.context);
 		this.context.register(Config.class);
 		this.context.refresh();
 		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
@@ -137,8 +165,9 @@ public class ConfigurationPropertiesReportEndpointTests
 	public void testKeySanitizationWithCustomPatternAndKeyByEnvironment()
 			throws Exception {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"endpoints.configprops.keys-to-sanitize: .*pass.*, property");
+		TestPropertyValues
+				.of("endpoints.configprops.keys-to-sanitize: .*pass.*, property")
+				.applyTo(this.context);
 		this.context.register(Config.class);
 		this.context.refresh();
 		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
@@ -156,8 +185,9 @@ public class ConfigurationPropertiesReportEndpointTests
 			throws Exception {
 		// gh-4415
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"endpoints.configprops.keys-to-sanitize: .*\\.secrets\\..*, .*\\.hidden\\..*");
+		TestPropertyValues
+				.of("endpoints.configprops.keys-to-sanitize: .*\\.secrets\\..*, .*\\.hidden\\..*")
+				.applyTo(this.context);
 		this.context.register(Config.class);
 		this.context.refresh();
 		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
@@ -183,13 +213,46 @@ public class ConfigurationPropertiesReportEndpointTests
 		assertThat(nestedProperties.get("mixedBoolean")).isEqualTo(true);
 	}
 
+	@Test
+	@SuppressWarnings("unchecked")
+	public void listsAreSanitized() throws Exception {
+		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
+		Map<String, Object> properties = report.invoke();
+		Map<String, Object> nestedProperties = (Map<String, Object>) ((Map<String, Object>) properties
+				.get("testProperties")).get("properties");
+		assertThat(nestedProperties.get("listItems")).isInstanceOf(List.class);
+		List<Object> list = (List<Object>) nestedProperties.get("listItems");
+		assertThat(list).hasSize(1);
+		Map<String, Object> item = (Map<String, Object>) list.get(0);
+		assertThat(item.get("somePassword")).isEqualTo("******");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	public void listsOfListsAreSanitized() throws Exception {
+		ConfigurationPropertiesReportEndpoint report = getEndpointBean();
+		Map<String, Object> properties = report.invoke();
+		Map<String, Object> nestedProperties = (Map<String, Object>) ((Map<String, Object>) properties
+				.get("testProperties")).get("properties");
+		assertThat(nestedProperties.get("listOfListItems")).isInstanceOf(List.class);
+		List<List<Object>> listOfLists = (List<List<Object>>) nestedProperties
+				.get("listOfListItems");
+		assertThat(listOfLists).hasSize(1);
+		List<Object> list = listOfLists.get(0);
+		assertThat(list).hasSize(1);
+		Map<String, Object> item = (Map<String, Object>) list.get(0);
+		assertThat(item.get("somePassword")).isEqualTo("******");
+	}
+
 	@Configuration
 	@EnableConfigurationProperties
 	public static class Parent {
+
 		@Bean
 		public TestProperties testProperties() {
 			return new TestProperties();
 		}
+
 	}
 
 	@Configuration
@@ -217,13 +280,21 @@ public class ConfigurationPropertiesReportEndpointTests
 
 		private Boolean mixedBoolean = true;
 
-		private Map<String, Object> secrets = new HashMap<String, Object>();
+		private Map<String, Object> secrets = new HashMap<>();
 
 		private Hidden hidden = new Hidden();
+
+		private List<ListItem> listItems = new ArrayList<>();
+
+		private List<List<ListItem>> listOfListItems = new ArrayList<>();
+
+		private String nullValue = null;
 
 		public TestProperties() {
 			this.secrets.put("mine", "myPrivateThing");
 			this.secrets.put("yours", "yourPrivateThing");
+			this.listItems.add(new ListItem());
+			this.listOfListItems.add(Arrays.asList(new ListItem()));
 		}
 
 		public String getDbPassword() {
@@ -266,6 +337,30 @@ public class ConfigurationPropertiesReportEndpointTests
 			this.hidden = hidden;
 		}
 
+		public List<ListItem> getListItems() {
+			return this.listItems;
+		}
+
+		public void setListItems(List<ListItem> listItems) {
+			this.listItems = listItems;
+		}
+
+		public List<List<ListItem>> getListOfListItems() {
+			return this.listOfListItems;
+		}
+
+		public void setListOfListItems(List<List<ListItem>> listOfListItems) {
+			this.listOfListItems = listOfListItems;
+		}
+
+		public String getNullValue() {
+			return this.nullValue;
+		}
+
+		public void setNullValue(String nullValue) {
+			this.nullValue = nullValue;
+		}
+
 		public static class Hidden {
 
 			private String mine = "mySecret";
@@ -280,5 +375,20 @@ public class ConfigurationPropertiesReportEndpointTests
 
 		}
 
+		public static class ListItem {
+
+			private String somePassword = "secret";
+
+			public String getSomePassword() {
+				return this.somePassword;
+			}
+
+			public void setSomePassword(String somePassword) {
+				this.somePassword = somePassword;
+			}
+
+		}
+
 	}
+
 }

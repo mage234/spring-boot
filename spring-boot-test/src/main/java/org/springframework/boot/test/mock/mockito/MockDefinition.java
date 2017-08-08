@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import org.mockito.Answers;
 import org.mockito.MockSettings;
 import org.mockito.Mockito;
 
+import org.springframework.core.ResolvableType;
 import org.springframework.core.style.ToStringCreator;
 import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
@@ -39,7 +40,7 @@ class MockDefinition extends Definition {
 
 	private static final int MULTIPLIER = 31;
 
-	private final Class<?> classToMock;
+	private final ResolvableType typeToMock;
 
 	private final Set<Class<?>> extraInterfaces;
 
@@ -47,22 +48,19 @@ class MockDefinition extends Definition {
 
 	private final boolean serializable;
 
-	MockDefinition(Class<?> classToMock) {
-		this(null, classToMock, null, null, false, null);
-	}
-
-	MockDefinition(String name, Class<?> classToMock, Class<?>[] extraInterfaces,
-			Answers answer, boolean serializable, MockReset reset) {
-		super(name, reset);
-		Assert.notNull(classToMock, "ClassToMock must not be null");
-		this.classToMock = classToMock;
+	MockDefinition(String name, ResolvableType typeToMock, Class<?>[] extraInterfaces,
+			Answers answer, boolean serializable, MockReset reset,
+			QualifierDefinition qualifier) {
+		super(name, reset, false, qualifier);
+		Assert.notNull(typeToMock, "TypeToMock must not be null");
+		this.typeToMock = typeToMock;
 		this.extraInterfaces = asClassSet(extraInterfaces);
 		this.answer = (answer != null ? answer : Answers.RETURNS_DEFAULTS);
 		this.serializable = serializable;
 	}
 
 	private Set<Class<?>> asClassSet(Class<?>[] classes) {
-		Set<Class<?>> classSet = new LinkedHashSet<Class<?>>();
+		Set<Class<?>> classSet = new LinkedHashSet<>();
 		if (classes != null) {
 			classSet.addAll(Arrays.asList(classes));
 		}
@@ -70,16 +68,16 @@ class MockDefinition extends Definition {
 	}
 
 	/**
-	 * Return the classes that should be mocked.
-	 * @return the class to mock; never {@code null}
+	 * Return the type that should be mocked.
+	 * @return the type to mock; never {@code null}
 	 */
-	public Class<?> getClassToMock() {
-		return this.classToMock;
+	public ResolvableType getTypeToMock() {
+		return this.typeToMock;
 	}
 
 	/**
 	 * Return the extra interfaces.
-	 * @return the extra interfaces or an empty array
+	 * @return the extra interfaces or an empty set
 	 */
 	public Set<Class<?>> getExtraInterfaces() {
 		return this.extraInterfaces;
@@ -87,7 +85,7 @@ class MockDefinition extends Definition {
 
 	/**
 	 * Return the answers mode.
-	 * @return the answer the answers mode; never {@code null}
+	 * @return the answers mode; never {@code null}
 	 */
 	public Answers getAnswer() {
 		return this.answer;
@@ -104,10 +102,10 @@ class MockDefinition extends Definition {
 	@Override
 	public int hashCode() {
 		int result = super.hashCode();
-		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.classToMock);
+		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.typeToMock);
 		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.extraInterfaces);
 		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.answer);
-		result = MULTIPLIER * result + (this.serializable ? 1231 : 1237);
+		result = MULTIPLIER * result + Boolean.hashCode(this.serializable);
 		return result;
 	}
 
@@ -121,17 +119,18 @@ class MockDefinition extends Definition {
 		}
 		MockDefinition other = (MockDefinition) obj;
 		boolean result = super.equals(obj);
-		result &= ObjectUtils.nullSafeEquals(this.classToMock, other.classToMock);
-		result &= ObjectUtils.nullSafeEquals(this.extraInterfaces, other.extraInterfaces);
-		result &= ObjectUtils.nullSafeEquals(this.answer, other.answer);
-		result &= this.serializable == other.serializable;
+		result = result && ObjectUtils.nullSafeEquals(this.typeToMock, other.typeToMock);
+		result = result && ObjectUtils.nullSafeEquals(this.extraInterfaces,
+				other.extraInterfaces);
+		result = result && ObjectUtils.nullSafeEquals(this.answer, other.answer);
+		result = result && this.serializable == other.serializable;
 		return result;
 	}
 
 	@Override
 	public String toString() {
 		return new ToStringCreator(this).append("name", getName())
-				.append("classToMock", this.classToMock)
+				.append("typeToMock", this.typeToMock)
 				.append("extraInterfaces", this.extraInterfaces)
 				.append("answer", this.answer).append("serializable", this.serializable)
 				.append("reset", getReset()).toString();
@@ -150,11 +149,11 @@ class MockDefinition extends Definition {
 		if (!this.extraInterfaces.isEmpty()) {
 			settings.extraInterfaces(this.extraInterfaces.toArray(new Class<?>[] {}));
 		}
-		settings.defaultAnswer(this.answer.get());
+		settings.defaultAnswer(MockitoApi.get().getAnswer(this.answer));
 		if (this.serializable) {
 			settings.serializable();
 		}
-		return (T) Mockito.mock(this.classToMock, settings);
+		return (T) Mockito.mock(this.typeToMock.resolve(), settings);
 	}
 
 }

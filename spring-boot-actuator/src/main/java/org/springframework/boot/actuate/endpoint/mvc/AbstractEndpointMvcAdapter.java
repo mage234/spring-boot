@@ -30,7 +30,7 @@ import org.springframework.util.Assert;
  * @since 1.3.0
  */
 public abstract class AbstractEndpointMvcAdapter<E extends Endpoint<?>>
-		implements MvcEndpoint {
+		implements NamedMvcEndpoint {
 
 	private final E delegate;
 
@@ -61,6 +61,11 @@ public abstract class AbstractEndpointMvcAdapter<E extends Endpoint<?>>
 	}
 
 	@Override
+	public String getName() {
+		return this.delegate.getId();
+	}
+
+	@Override
 	public String getPath() {
 		return (this.path != null ? this.path : "/" + this.delegate.getId());
 	}
@@ -73,11 +78,6 @@ public abstract class AbstractEndpointMvcAdapter<E extends Endpoint<?>>
 			path = "/" + path;
 		}
 		this.path = path;
-	}
-
-	@Override
-	public boolean isSensitive() {
-		return this.delegate.isSensitive();
 	}
 
 	@Override

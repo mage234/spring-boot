@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,14 +21,13 @@ import org.junit.Test;
 import org.neo4j.ogm.session.SessionFactory;
 
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
-import org.springframework.boot.autoconfigure.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.autoconfigure.TestAutoConfigurationPackage;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.alt.neo4j.CityNeo4jRepository;
 import org.springframework.boot.autoconfigure.data.empty.EmptyDataPackage;
 import org.springframework.boot.autoconfigure.data.neo4j.city.City;
 import org.springframework.boot.autoconfigure.data.neo4j.city.CityRepository;
-import org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.neo4j.mapping.Neo4jMappingContext;
@@ -57,41 +56,36 @@ public class Neo4jRepositoriesAutoConfigurationTests {
 	@Test
 	public void testDefaultRepositoryConfiguration() throws Exception {
 		prepareApplicationContext(TestConfiguration.class);
-
 		assertThat(this.context.getBean(CityRepository.class)).isNotNull();
 		Neo4jMappingContext mappingContext = this.context
 				.getBean(Neo4jMappingContext.class);
 		assertThat(mappingContext.getPersistentEntity(City.class)).isNotNull();
-
 	}
 
 	@Test
 	public void testNoRepositoryConfiguration() throws Exception {
 		prepareApplicationContext(EmptyConfiguration.class);
-
 		assertThat(this.context.getBean(SessionFactory.class)).isNotNull();
 	}
 
 	@Test
 	public void doesNotTriggerDefaultRepositoryDetectionIfCustomized() {
 		prepareApplicationContext(CustomizedConfiguration.class);
-
 		assertThat(this.context.getBean(CityNeo4jRepository.class)).isNotNull();
 	}
 
 	@Test(expected = NoSuchBeanDefinitionException.class)
 	public void autoConfigurationShouldNotKickInEvenIfManualConfigDidNotCreateAnyRepositories() {
 		prepareApplicationContext(SortOfInvalidCustomConfiguration.class);
-
 		this.context.getBean(CityRepository.class);
 	}
 
 	private void prepareApplicationContext(Class<?>... configurationClasses) {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.data.neo4j.uri=http://localhost:9797");
+		TestPropertyValues.of("spring.data.neo4j.uri=http://localhost:9797")
+				.applyTo(this.context);
 		this.context.register(configurationClasses);
-		this.context.register(Neo4jAutoConfiguration.class,
+		this.context.register(Neo4jDataAutoConfiguration.class,
 				Neo4jRepositoriesAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
 		this.context.refresh();

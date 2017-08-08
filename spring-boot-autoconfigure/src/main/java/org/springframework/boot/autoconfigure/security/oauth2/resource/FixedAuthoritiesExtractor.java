@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ public class FixedAuthoritiesExtractor implements AuthoritiesExtractor {
 	}
 
 	private String asAuthorities(Object object) {
-		List<Object> authorities = new ArrayList<Object>();
+		List<Object> authorities = new ArrayList<>();
 		if (object instanceof Collection) {
 			Collection<?> collection = (Collection<?>) object;
 			object = collection.toArray(new Object[0]);
@@ -79,7 +79,7 @@ public class FixedAuthoritiesExtractor implements AuthoritiesExtractor {
 		}
 		for (String key : AUTHORITY_KEYS) {
 			if (map.containsKey(key)) {
-				return map.get(map);
+				return map.get(key);
 			}
 		}
 		return map;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,22 +55,24 @@ class SpringApplicationBannerPrinter {
 		this.fallbackBanner = fallbackBanner;
 	}
 
-	public void print(Environment environment, Class<?> sourceClass, Log logger) {
-		Banner banner = getBanner(environment, this.fallbackBanner);
+	public Banner print(Environment environment, Class<?> sourceClass, Log logger) {
+		Banner banner = getBanner(environment);
 		try {
 			logger.info(createStringFromBanner(banner, environment, sourceClass));
 		}
 		catch (UnsupportedEncodingException ex) {
 			logger.warn("Failed to create String for banner", ex);
 		}
+		return new PrintedBanner(banner, sourceClass);
 	}
 
-	public void print(Environment environment, Class<?> sourceClass, PrintStream out) {
-		Banner banner = getBanner(environment, this.fallbackBanner);
+	public Banner print(Environment environment, Class<?> sourceClass, PrintStream out) {
+		Banner banner = getBanner(environment);
 		banner.printBanner(environment, sourceClass, out);
+		return new PrintedBanner(banner, sourceClass);
 	}
 
-	private Banner getBanner(Environment environment, Banner definedBanner) {
+	private Banner getBanner(Environment environment) {
 		Banners banners = new Banners();
 		banners.addIfNotNull(getImageBanner(environment));
 		banners.addIfNotNull(getTextBanner(environment));
@@ -121,7 +123,7 @@ class SpringApplicationBannerPrinter {
 	 */
 	private static class Banners implements Banner {
 
-		private final List<Banner> banners = new ArrayList<Banner>();
+		private final List<Banner> banners = new ArrayList<>();
 
 		public void addIfNotNull(Banner banner) {
 			if (banner != null) {
@@ -139,6 +141,30 @@ class SpringApplicationBannerPrinter {
 			for (Banner banner : this.banners) {
 				banner.printBanner(environment, sourceClass, out);
 			}
+		}
+
+	}
+
+	/**
+	 * Decorator that allows a {@link Banner} to be printed again without needing to
+	 * specify the source class.
+	 */
+	private static class PrintedBanner implements Banner {
+
+		private final Banner banner;
+
+		private final Class<?> sourceClass;
+
+		PrintedBanner(Banner banner, Class<?> sourceClass) {
+			this.banner = banner;
+			this.sourceClass = sourceClass;
+		}
+
+		@Override
+		public void printBanner(Environment environment, Class<?> sourceClass,
+				PrintStream out) {
+			sourceClass = (sourceClass == null ? this.sourceClass : sourceClass);
+			this.banner.printBanner(environment, sourceClass, out);
 		}
 
 	}

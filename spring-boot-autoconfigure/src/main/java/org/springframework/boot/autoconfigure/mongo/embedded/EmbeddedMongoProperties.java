@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,14 +37,14 @@ public class EmbeddedMongoProperties {
 	/**
 	 * Version of Mongo to use.
 	 */
-	private String version = "2.6.10";
+	private String version = "3.2.2";
 
 	private final Storage storage = new Storage();
 
 	/**
 	 * Comma-separated list of features to enable.
 	 */
-	private Set<Feature> features = new HashSet<Feature>(
+	private Set<Feature> features = new HashSet<>(
 			Collections.singletonList(Feature.SYNC_DELAY));
 
 	public String getVersion() {

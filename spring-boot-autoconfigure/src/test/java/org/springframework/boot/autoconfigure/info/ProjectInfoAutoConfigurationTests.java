@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ import java.util.Properties;
 import org.junit.After;
 import org.junit.Test;
 
-import org.springframework.boot.autoconfigure.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.boot.info.GitProperties;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -105,7 +105,7 @@ public class ProjectInfoAutoConfigurationTests {
 
 	@Test
 	public void buildPropertiesCustomLocation() {
-		load("spring.info.build.location=classpath:/org/springframework/boot/autoconfigure/info/build.properties");
+		load("spring.info.build.location=classpath:/org/springframework/boot/autoconfigure/info/build-info.properties");
 		BuildProperties buildProperties = this.context.getBean(BuildProperties.class);
 		assertThat(buildProperties.getGroup()).isEqualTo("com.example.acme");
 		assertThat(buildProperties.getArtifact()).isEqualTo("acme");
@@ -116,7 +116,7 @@ public class ProjectInfoAutoConfigurationTests {
 
 	@Test
 	public void buildPropertiesCustomInvalidLocation() {
-		load("spring.info.build.location=classpath:/org/acme/no-build.properties");
+		load("spring.info.build.location=classpath:/org/acme/no-build-info.properties");
 		Map<String, BuildProperties> beans = this.context
 				.getBeansOfType(BuildProperties.class);
 		assertThat(beans).hasSize(0);
@@ -141,7 +141,7 @@ public class ProjectInfoAutoConfigurationTests {
 		}
 		context.register(PropertyPlaceholderAutoConfiguration.class,
 				ProjectInfoAutoConfiguration.class);
-		EnvironmentTestUtils.addEnvironment(context, environment);
+		TestPropertyValues.of(environment).applyTo(context);
 		context.refresh();
 		this.context = context;
 	}

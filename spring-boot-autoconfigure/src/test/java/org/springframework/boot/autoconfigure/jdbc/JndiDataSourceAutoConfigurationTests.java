@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,12 +30,13 @@ import org.junit.Test;
 import org.springframework.beans.DirectFieldAccessor;
 import org.springframework.boot.autoconfigure.jndi.JndiPropertiesHidingClassLoader;
 import org.springframework.boot.autoconfigure.jndi.TestableInitialContextFactory;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.jmx.export.MBeanExporter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for {@link JndiDataSourceAutoConfiguration}
@@ -87,8 +88,7 @@ public class JndiDataSourceAutoConfigurationTests {
 		configureJndi("foo", dataSource);
 
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.datasource.jndi-name:foo");
+		TestPropertyValues.of("spring.datasource.jndi-name:foo").applyTo(this.context);
 		this.context.register(JndiDataSourceAutoConfiguration.class);
 		this.context.refresh();
 
@@ -103,8 +103,7 @@ public class JndiDataSourceAutoConfigurationTests {
 		configureJndi("foo", dataSource);
 
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.datasource.jndi-name:foo");
+		TestPropertyValues.of("spring.datasource.jndi-name:foo").applyTo(this.context);
 		this.context.register(JndiDataSourceAutoConfiguration.class,
 				MBeanExporterConfiguration.class);
 		this.context.refresh();
@@ -120,12 +119,11 @@ public class JndiDataSourceAutoConfigurationTests {
 	@Test
 	public void standardDataSourceIsNotExcludedFromExport()
 			throws IllegalStateException, NamingException {
-		DataSource dataSource = new org.apache.commons.dbcp.BasicDataSource();
+		DataSource dataSource = mock(DataSource.class);
 		configureJndi("foo", dataSource);
 
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.datasource.jndi-name:foo");
+		TestPropertyValues.of("spring.datasource.jndi-name:foo").applyTo(this.context);
 		this.context.register(JndiDataSourceAutoConfiguration.class,
 				MBeanExporterConfiguration.class);
 		this.context.refresh();
@@ -148,6 +146,7 @@ public class JndiDataSourceAutoConfigurationTests {
 		MBeanExporter mbeanExporter() {
 			return new MBeanExporter();
 		}
+
 	}
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@
 package org.springframework.boot.actuate.endpoint;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
 
-import org.springframework.boot.actuate.info.Info;
 import org.springframework.boot.actuate.info.InfoContributor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -38,12 +38,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class InfoEndpointTests extends AbstractEndpointTests<InfoEndpoint> {
 
 	public InfoEndpointTests() {
-		super(Config.class, InfoEndpoint.class, "info", false, "endpoints.info");
+		super(Config.class, InfoEndpoint.class, "info", "endpoints.info");
 	}
 
 	@Test
 	public void invoke() throws Exception {
-		Info actual = getEndpointBean().invoke();
+		Map<String, Object> actual = getEndpointBean().invoke();
 		assertThat(actual.get("key1")).isEqualTo("value1");
 	}
 
@@ -53,14 +53,7 @@ public class InfoEndpointTests extends AbstractEndpointTests<InfoEndpoint> {
 
 		@Bean
 		public InfoContributor infoContributor() {
-			return new InfoContributor() {
-
-				@Override
-				public void contribute(Info.Builder builder) {
-					builder.withDetail("key1", "value1");
-				}
-
-			};
+			return (builder) -> builder.withDetail("key1", "value1");
 		}
 
 		@Bean

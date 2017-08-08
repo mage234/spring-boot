@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ import org.springframework.boot.actuate.cache.CaffeineCacheStatisticsProvider;
 import org.springframework.boot.actuate.cache.ConcurrentMapCacheStatisticsProvider;
 import org.springframework.boot.actuate.cache.DefaultCacheStatistics;
 import org.springframework.boot.actuate.cache.EhCacheStatisticsProvider;
-import org.springframework.boot.actuate.cache.GuavaCacheStatisticsProvider;
 import org.springframework.boot.actuate.cache.HazelcastCacheStatisticsProvider;
 import org.springframework.boot.actuate.cache.InfinispanCacheStatisticsProvider;
 import org.springframework.boot.actuate.cache.JCacheCacheStatisticsProvider;
@@ -45,7 +44,6 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.cache.concurrent.ConcurrentMapCache;
 import org.springframework.cache.ehcache.EhCacheCache;
-import org.springframework.cache.guava.GuavaCache;
 import org.springframework.cache.jcache.JCacheCache;
 import org.springframework.cache.support.NoOpCacheManager;
 import org.springframework.context.annotation.Bean;
@@ -95,6 +93,7 @@ public class CacheStatisticsAutoConfiguration {
 		public HazelcastCacheStatisticsProvider hazelcastCacheStatisticsProvider() {
 			return new HazelcastCacheStatisticsProvider();
 		}
+
 	}
 
 	@Configuration
@@ -120,17 +119,6 @@ public class CacheStatisticsAutoConfiguration {
 	}
 
 	@Configuration
-	@ConditionalOnClass({ com.google.common.cache.Cache.class, GuavaCache.class })
-	static class GuavaCacheStatisticsConfiguration {
-
-		@Bean
-		public GuavaCacheStatisticsProvider guavaCacheStatisticsProvider() {
-			return new GuavaCacheStatisticsProvider();
-		}
-
-	}
-
-	@Configuration
 	@ConditionalOnClass(ConcurrentMapCache.class)
 	static class ConcurrentMapCacheStatisticsConfiguration {
 
@@ -149,15 +137,11 @@ public class CacheStatisticsAutoConfiguration {
 
 		@Bean
 		public CacheStatisticsProvider<Cache> noOpCacheStatisticsProvider() {
-			return new CacheStatisticsProvider<Cache>() {
-				@Override
-				public CacheStatistics getCacheStatistics(CacheManager cacheManager,
-						Cache cache) {
-					if (cacheManager instanceof NoOpCacheManager) {
-						return NO_OP_STATS;
-					}
-					return null;
+			return (cacheManager, cache) -> {
+				if (cacheManager instanceof NoOpCacheManager) {
+					return NO_OP_STATS;
 				}
+				return null;
 			};
 		}
 

@@ -24,7 +24,7 @@ import sample.test.service.VehicleDetails;
 import sample.test.service.VehicleDetailsService;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -34,7 +34,7 @@ import org.springframework.test.context.junit4.SpringRunner;
 import static org.mockito.BDDMockito.given;
 
 /**
- * {@code @WebIntegrationTest} for {@link SampleTestApplication}.
+ * {@code @SpringBootTest} with a random port for {@link SampleTestApplication}.
  *
  * @author Phillip Webb
  */

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,22 @@
 
 package org.springframework.boot.autoconfigure.data.couchbase;
 
+import java.util.Set;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.domain.EntityScanner;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.annotation.Persistent;
+import org.springframework.data.convert.CustomConversions;
 import org.springframework.data.couchbase.config.AbstractCouchbaseDataConfiguration;
 import org.springframework.data.couchbase.config.BeanNames;
 import org.springframework.data.couchbase.config.CouchbaseConfigurer;
 import org.springframework.data.couchbase.core.CouchbaseTemplate;
+import org.springframework.data.couchbase.core.mapping.Document;
 import org.springframework.data.couchbase.core.query.Consistency;
 import org.springframework.data.couchbase.repository.support.IndexManager;
 
@@ -38,14 +45,18 @@ import org.springframework.data.couchbase.repository.support.IndexManager;
 @ConditionalOnBean(CouchbaseConfigurer.class)
 class SpringBootCouchbaseDataConfiguration extends AbstractCouchbaseDataConfiguration {
 
+	private final ApplicationContext applicationContext;
+
 	private final CouchbaseDataProperties properties;
 
 	private final CouchbaseConfigurer couchbaseConfigurer;
 
-	SpringBootCouchbaseDataConfiguration(CouchbaseDataProperties properties,
-			ObjectProvider<CouchbaseConfigurer> couchbaseConfigurerProvider) {
+	SpringBootCouchbaseDataConfiguration(ApplicationContext applicationContext,
+			CouchbaseDataProperties properties,
+			ObjectProvider<CouchbaseConfigurer> couchbaseConfigurer) {
+		this.applicationContext = applicationContext;
 		this.properties = properties;
-		this.couchbaseConfigurer = couchbaseConfigurerProvider.getIfAvailable();
+		this.couchbaseConfigurer = couchbaseConfigurer.getIfAvailable();
 	}
 
 	@Override
@@ -59,10 +70,23 @@ class SpringBootCouchbaseDataConfiguration extends AbstractCouchbaseDataConfigur
 	}
 
 	@Override
+	protected Set<Class<?>> getInitialEntitySet() throws ClassNotFoundException {
+		return new EntityScanner(this.applicationContext).scan(Document.class,
+				Persistent.class);
+	}
+
+	@Override
 	@ConditionalOnMissingBean(name = BeanNames.COUCHBASE_TEMPLATE)
 	@Bean(name = BeanNames.COUCHBASE_TEMPLATE)
 	public CouchbaseTemplate couchbaseTemplate() throws Exception {
 		return super.couchbaseTemplate();
+	}
+
+	@Override
+	@ConditionalOnMissingBean(name = BeanNames.COUCHBASE_CUSTOM_CONVERSIONS)
+	@Bean(name = BeanNames.COUCHBASE_CUSTOM_CONVERSIONS)
+	public CustomConversions customConversions() {
+		return super.customConversions();
 	}
 
 	@Override

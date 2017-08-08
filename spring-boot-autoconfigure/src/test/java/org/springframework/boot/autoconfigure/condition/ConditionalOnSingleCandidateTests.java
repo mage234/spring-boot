@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import static org.hamcrest.CoreMatchers.isA;
  * Tests for {@link ConditionalOnSingleCandidate}.
  *
  * @author Stephane Nicoll
+ * @author Andy Wilkinson
  */
 public class ConditionalOnSingleCandidateTests {
 
@@ -59,6 +60,46 @@ public class ConditionalOnSingleCandidateTests {
 		load(FooConfiguration.class, OnBeanSingleCandidateConfiguration.class);
 		assertThat(this.context.containsBean("baz")).isTrue();
 		assertThat(this.context.getBean("baz")).isEqualTo("foo");
+	}
+
+	@Test
+	public void singleCandidateInAncestorsOneCandidateInCurrent() {
+		load();
+		AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext();
+		child.register(FooConfiguration.class,
+				OnBeanSingleCandidateInAncestorsConfiguration.class);
+		child.setParent(this.context);
+		child.refresh();
+		assertThat(child.containsBean("baz")).isFalse();
+		child.close();
+	}
+
+	@Test
+	public void singleCandidateInAncestorsOneCandidateInParent() {
+		load(FooConfiguration.class);
+		AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext();
+		child.register(OnBeanSingleCandidateInAncestorsConfiguration.class);
+		child.setParent(this.context);
+		child.refresh();
+		assertThat(child.containsBean("baz")).isTrue();
+		assertThat(child.getBean("baz")).isEqualTo("foo");
+		child.close();
+	}
+
+	@Test
+	public void singleCandidateInAncestorsOneCandidateInGrandparent() {
+		load(FooConfiguration.class);
+		AnnotationConfigApplicationContext parent = new AnnotationConfigApplicationContext();
+		parent.setParent(this.context);
+		parent.refresh();
+		AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext();
+		child.register(OnBeanSingleCandidateInAncestorsConfiguration.class);
+		child.setParent(parent);
+		child.refresh();
+		assertThat(child.containsBean("baz")).isTrue();
+		assertThat(child.getBean("baz")).isEqualTo("foo");
+		child.close();
+		parent.close();
 	}
 
 	@Test
@@ -101,14 +142,39 @@ public class ConditionalOnSingleCandidateTests {
 		load(OnBeanSingleCandidateNoTypeConfiguration.class);
 	}
 
+	@Test
+	public void singleCandidateMultipleCandidatesInContextHierarchy() {
+		load(FooPrimaryConfiguration.class, BarConfiguration.class);
+		try (AnnotationConfigApplicationContext child = new AnnotationConfigApplicationContext()) {
+			child.setParent(this.context);
+			child.register(OnBeanSingleCandidateConfiguration.class);
+			child.refresh();
+			assertThat(child.containsBean("baz")).isTrue();
+			assertThat(child.getBean("baz")).isEqualTo("foo");
+		}
+	}
+
 	private void load(Class<?>... classes) {
-		this.context.register(classes);
+		if (classes.length > 0) {
+			this.context.register(classes);
+		}
 		this.context.refresh();
 	}
 
 	@Configuration
 	@ConditionalOnSingleCandidate(String.class)
 	protected static class OnBeanSingleCandidateConfiguration {
+
+		@Bean
+		public String baz(String s) {
+			return s;
+		}
+
+	}
+
+	@Configuration
+	@ConditionalOnSingleCandidate(value = String.class, search = SearchStrategy.ANCESTORS)
+	protected static class OnBeanSingleCandidateInAncestorsConfiguration {
 
 		@Bean
 		public String baz(String s) {
@@ -170,4 +236,5 @@ public class ConditionalOnSingleCandidateTests {
 		}
 
 	}
+
 }

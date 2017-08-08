@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2014 the original author or authors.
+ * Copyright 2012-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,7 +121,6 @@ public class ImageBannerTests {
 		AnsiOutput.setEnabled(AnsiOutput.Enabled.NEVER);
 		String banner = printBanner("gradient.gif", "banner.image.width=10",
 				"banner.image.margin=0");
-		System.out.println(banner);
 		assertThat(banner).contains("@#8&o:*.  ");
 	}
 
@@ -157,7 +156,8 @@ public class ImageBannerTests {
 	}
 
 	@Test
-	public void printBannerWhenHasMarginPropertShouldPrintSizedMargin() throws Exception {
+	public void printBannerWhenHasMarginPropertyShouldPrintSizedMargin()
+			throws Exception {
 		AnsiOutput.setEnabled(AnsiOutput.Enabled.NEVER);
 		String banner = printBanner("large.gif", "banner.image.margin=4");
 		String[] lines = banner.split(NEW_LINE);

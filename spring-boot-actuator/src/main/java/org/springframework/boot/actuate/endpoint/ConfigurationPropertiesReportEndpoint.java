@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,13 @@
 package org.springframework.boot.actuate.endpoint;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.databind.BeanDescription;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationConfig;
@@ -57,6 +59,7 @@ import org.springframework.util.StringUtils;
  *
  * @author Christian Dupuis
  * @author Dave Syer
+ * @author Stephane Nicoll
  */
 @ConfigurationProperties(prefix = "endpoints.configprops")
 public class ConfigurationPropertiesReportEndpoint
@@ -100,7 +103,7 @@ public class ConfigurationPropertiesReportEndpoint
 	}
 
 	private Map<String, Object> extract(ApplicationContext context, ObjectMapper mapper) {
-		Map<String, Object> result = new HashMap<String, Object>();
+		Map<String, Object> result = new HashMap<>();
 		ConfigurationBeanFactoryMetaData beanFactoryMetaData = getBeanFactoryMetaData(
 				context);
 		Map<String, Object> beans = getConfigurationPropertiesBeans(context,
@@ -108,7 +111,7 @@ public class ConfigurationPropertiesReportEndpoint
 		for (Map.Entry<String, Object> entry : beans.entrySet()) {
 			String beanName = entry.getKey();
 			Object bean = entry.getValue();
-			Map<String, Object> root = new HashMap<String, Object>();
+			Map<String, Object> root = new HashMap<>();
 			String prefix = extractPrefix(context, beanFactoryMetaData, beanName, bean);
 			root.put("prefix", prefix);
 			root.put("properties", sanitize(prefix, safeSerialize(mapper, bean, prefix)));
@@ -133,7 +136,7 @@ public class ConfigurationPropertiesReportEndpoint
 	private Map<String, Object> getConfigurationPropertiesBeans(
 			ApplicationContext context,
 			ConfigurationBeanFactoryMetaData beanFactoryMetaData) {
-		Map<String, Object> beans = new HashMap<String, Object>();
+		Map<String, Object> beans = new HashMap<>();
 		beans.putAll(context.getBeansWithAnnotation(ConfigurationProperties.class));
 		if (beanFactoryMetaData != null) {
 			beans.putAll(beanFactoryMetaData
@@ -154,13 +157,13 @@ public class ConfigurationPropertiesReportEndpoint
 			String prefix) {
 		try {
 			@SuppressWarnings("unchecked")
-			Map<String, Object> result = new HashMap<String, Object>(
+			Map<String, Object> result = new HashMap<>(
 					mapper.convertValue(bean, Map.class));
 			return result;
 		}
 		catch (Exception ex) {
-			return new HashMap<String, Object>(Collections.<String, Object>singletonMap(
-					"error", "Cannot serialize '" + prefix + "'"));
+			return new HashMap<>(Collections.<String, Object>singletonMap("error",
+					"Cannot serialize '" + prefix + "'"));
 		}
 	}
 
@@ -171,7 +174,7 @@ public class ConfigurationPropertiesReportEndpoint
 	 */
 	protected void configureObjectMapper(ObjectMapper mapper) {
 		mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-		mapper.configure(SerializationFeature.WRITE_NULL_MAP_VALUES, false);
+		mapper.setSerializationInclusion(Include.NON_NULL);
 		applyCglibFilters(mapper);
 		applySerializationModifier(mapper);
 	}
@@ -220,8 +223,7 @@ public class ConfigurationPropertiesReportEndpoint
 				annotation = override;
 			}
 		}
-		return (StringUtils.hasLength(annotation.value()) ? annotation.value()
-				: annotation.prefix());
+		return annotation.prefix();
 	}
 
 	/**
@@ -235,10 +237,13 @@ public class ConfigurationPropertiesReportEndpoint
 	private Map<String, Object> sanitize(String prefix, Map<String, Object> map) {
 		for (Map.Entry<String, Object> entry : map.entrySet()) {
 			String key = entry.getKey();
-			String qualifiedKey = (prefix.length() == 0 ? prefix : prefix + ".") + key;
+			String qualifiedKey = (prefix.isEmpty() ? prefix : prefix + ".") + key;
 			Object value = entry.getValue();
 			if (value instanceof Map) {
 				map.put(key, sanitize(qualifiedKey, (Map<String, Object>) value));
+			}
+			else if (value instanceof List) {
+				map.put(key, sanitize(qualifiedKey, (List<Object>) value));
 			}
 			else {
 				value = this.sanitizer.sanitize(key, value);
@@ -247,6 +252,23 @@ public class ConfigurationPropertiesReportEndpoint
 			}
 		}
 		return map;
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<Object> sanitize(String prefix, List<Object> list) {
+		List<Object> sanitized = new ArrayList<>();
+		for (Object item : list) {
+			if (item instanceof Map) {
+				sanitized.add(sanitize(prefix, (Map<String, Object>) item));
+			}
+			else if (item instanceof List) {
+				sanitized.add(sanitize(prefix, (List<Object>) item));
+			}
+			else {
+				sanitized.add(this.sanitizer.sanitize(prefix, item));
+			}
+		}
+		return sanitized;
 	}
 
 	/**
@@ -298,7 +320,7 @@ public class ConfigurationPropertiesReportEndpoint
 		@Override
 		public List<BeanPropertyWriter> changeProperties(SerializationConfig config,
 				BeanDescription beanDesc, List<BeanPropertyWriter> beanProperties) {
-			List<BeanPropertyWriter> result = new ArrayList<BeanPropertyWriter>();
+			List<BeanPropertyWriter> result = new ArrayList<>();
 			for (BeanPropertyWriter writer : beanProperties) {
 				boolean readable = isReadable(beanDesc, writer);
 				if (readable) {
@@ -309,16 +331,20 @@ public class ConfigurationPropertiesReportEndpoint
 		}
 
 		private boolean isReadable(BeanDescription beanDesc, BeanPropertyWriter writer) {
-			String parentType = beanDesc.getType().getRawClass().getName();
-			String type = writer.getType().getTypeName();
+			Class<?> parentType = beanDesc.getType().getRawClass();
+			Class<?> type = writer.getType().getRawClass();
 			AnnotatedMethod setter = findSetter(beanDesc, writer);
 			// If there's a setter, we assume it's OK to report on the value,
 			// similarly, if there's no setter but the package names match, we assume
 			// that its a nested class used solely for binding to config props, so it
-			// should be kosher. This filter is not used if there is JSON metadata for
-			// the property, so it's mainly for user-defined beans.
-			return (setter != null) || ClassUtils.getPackageName(parentType)
-					.equals(ClassUtils.getPackageName(type));
+			// should be kosher. Lists and Maps are also auto-detected by default since
+			// that's what the metadata generator does. This filter is not used if there
+			// is JSON metadata for the property, so it's mainly for user-defined beans.
+			return (setter != null)
+					|| ClassUtils.getPackageName(parentType)
+							.equals(ClassUtils.getPackageName(type))
+					|| Map.class.isAssignableFrom(type)
+					|| Collection.class.isAssignableFrom(type);
 		}
 
 		private AnnotatedMethod findSetter(BeanDescription beanDesc,
@@ -333,6 +359,6 @@ public class ConfigurationPropertiesReportEndpoint
 			}
 			return setter;
 		}
-	}
 
+	}
 }

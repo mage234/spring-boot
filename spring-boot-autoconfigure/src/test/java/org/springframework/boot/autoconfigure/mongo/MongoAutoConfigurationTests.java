@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,28 @@
 
 package org.springframework.boot.autoconfigure.mongo;
 
+import javax.net.SocketFactory;
+
 import com.mongodb.Mongo;
+import com.mongodb.MongoClient;
 import com.mongodb.MongoClientOptions;
 import org.junit.After;
 import org.junit.Test;
 
-import org.springframework.boot.autoconfigure.PropertyPlaceholderAutoConfiguration;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for {@link MongoAutoConfiguration}.
  *
  * @author Dave Syer
+ * @author Stephane Nicoll
  */
 public class MongoAutoConfigurationTests {
 
@@ -52,38 +57,66 @@ public class MongoAutoConfigurationTests {
 		assertThat(this.context.getBeanNamesForType(Mongo.class).length).isEqualTo(1);
 	}
 
-	@SuppressWarnings("deprecation")
 	@Test
 	public void optionsAdded() {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.data.mongodb.host:localhost");
+		TestPropertyValues.of("spring.data.mongodb.host:localhost").applyTo(this.context);
 		this.context.register(OptionsConfig.class,
 				PropertyPlaceholderAutoConfiguration.class, MongoAutoConfiguration.class);
 		this.context.refresh();
-		assertThat(this.context.getBean(Mongo.class).getMongoOptions().getSocketTimeout())
-				.isEqualTo(300);
+		assertThat(this.context.getBean(MongoClient.class).getMongoClientOptions()
+				.getSocketTimeout()).isEqualTo(300);
 	}
 
-	@SuppressWarnings("deprecation")
 	@Test
 	public void optionsAddedButNoHost() {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.data.mongodb.uri:mongodb://localhost/test");
+		TestPropertyValues.of("spring.data.mongodb.uri:mongodb://localhost/test")
+				.applyTo(this.context);
 		this.context.register(OptionsConfig.class,
 				PropertyPlaceholderAutoConfiguration.class, MongoAutoConfiguration.class);
 		this.context.refresh();
-		assertThat(this.context.getBean(Mongo.class).getMongoOptions().getSocketTimeout())
-				.isEqualTo(300);
+		assertThat(this.context.getBean(MongoClient.class).getMongoClientOptions()
+				.getSocketTimeout()).isEqualTo(300);
+	}
+
+	@Test
+	public void optionsSslConfig() {
+		this.context = new AnnotationConfigApplicationContext();
+		TestPropertyValues.of("spring.data.mongodb.uri:mongodb://localhost/test")
+				.applyTo(this.context);
+		this.context.register(SslOptionsConfig.class,
+				PropertyPlaceholderAutoConfiguration.class, MongoAutoConfiguration.class);
+		this.context.refresh();
+		MongoClient mongo = this.context.getBean(MongoClient.class);
+		MongoClientOptions options = mongo.getMongoClientOptions();
+		assertThat(options.isSslEnabled()).isTrue();
+		assertThat(options.getSocketFactory())
+				.isSameAs(this.context.getBean("mySocketFactory"));
 	}
 
 	@Configuration
-	protected static class OptionsConfig {
+	static class OptionsConfig {
 
 		@Bean
 		public MongoClientOptions mongoOptions() {
 			return MongoClientOptions.builder().socketTimeout(300).build();
+		}
+
+	}
+
+	@Configuration
+	static class SslOptionsConfig {
+
+		@Bean
+		public MongoClientOptions mongoClientOptions() {
+			return MongoClientOptions.builder().sslEnabled(true)
+					.socketFactory(mySocketFactory()).build();
+		}
+
+		@Bean
+		public SocketFactory mySocketFactory() {
+			return mock(SocketFactory.class);
 		}
 
 	}

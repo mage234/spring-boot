@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@ package org.springframework.boot.autoconfigure.liquibase;
 import java.io.File;
 import java.util.Map;
 
+import javax.sql.DataSource;
+
+import com.zaxxer.hikari.HikariDataSource;
 import liquibase.integration.spring.SpringLiquibase;
 import org.junit.After;
 import org.junit.Before;
@@ -28,11 +31,17 @@ import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
 
 import org.springframework.beans.factory.BeanCreationException;
-import org.springframework.boot.autoconfigure.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceBuilder;
 import org.springframework.boot.autoconfigure.jdbc.EmbeddedDataSourceConfiguration;
 import org.springframework.boot.liquibase.CommonsLoggingLiquibaseLogger;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.liquibase.LiquibaseServiceLocatorApplicationListener;
+import org.springframework.boot.test.rule.OutputCapture;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.FileCopyUtils;
 
@@ -42,6 +51,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests for {@link LiquibaseAutoConfiguration}.
  *
  * @author Marcel Overdijk
+ * @author Eddú Meléndez
+ * @author Andy Wilkinson
  */
 public class LiquibaseAutoConfigurationTests {
 
@@ -51,12 +62,16 @@ public class LiquibaseAutoConfigurationTests {
 	@Rule
 	public TemporaryFolder temp = new TemporaryFolder();
 
+	@Rule
+	public OutputCapture outputCapture = new OutputCapture();
+
 	private AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
 
 	@Before
 	public void init() {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.datasource.name:liquibasetest");
+		TestPropertyValues.of("spring.datasource.name:liquibasetest")
+				.applyTo(this.context);
+		new LiquibaseServiceLocatorApplicationListener().onApplicationEvent(null);
 	}
 
 	@After
@@ -90,9 +105,10 @@ public class LiquibaseAutoConfigurationTests {
 	}
 
 	@Test
-	public void testOverrideChangeLog() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.change-log:classpath:/db/changelog/db.changelog-override.xml");
+	public void testXmlChangeLog() throws Exception {
+		TestPropertyValues
+				.of("spring.liquibase.change-log:classpath:/db/changelog/db.changelog-override.xml")
+				.applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -103,9 +119,37 @@ public class LiquibaseAutoConfigurationTests {
 	}
 
 	@Test
+	public void testJsonChangeLog() throws Exception {
+		TestPropertyValues
+				.of("spring.liquibase.change-log:classpath:/db/changelog/db.changelog-override.json")
+				.applyTo(this.context);
+		this.context.register(EmbeddedDataSourceConfiguration.class,
+				LiquibaseAutoConfiguration.class,
+				PropertyPlaceholderAutoConfiguration.class);
+		this.context.refresh();
+		SpringLiquibase liquibase = this.context.getBean(SpringLiquibase.class);
+		assertThat(liquibase.getChangeLog())
+				.isEqualTo("classpath:/db/changelog/db.changelog-override.json");
+	}
+
+	@Test
+	public void testSqlChangeLog() throws Exception {
+		TestPropertyValues
+				.of("spring.liquibase.change-log:classpath:/db/changelog/db.changelog-override.sql")
+				.applyTo(this.context);
+		this.context.register(EmbeddedDataSourceConfiguration.class,
+				LiquibaseAutoConfiguration.class,
+				PropertyPlaceholderAutoConfiguration.class);
+		this.context.refresh();
+		SpringLiquibase liquibase = this.context.getBean(SpringLiquibase.class);
+		assertThat(liquibase.getChangeLog())
+				.isEqualTo("classpath:/db/changelog/db.changelog-override.sql");
+	}
+
+	@Test
 	public void testOverrideContexts() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.contexts:test, production");
+		TestPropertyValues.of("spring.liquibase.contexts:test, production")
+				.applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -116,8 +160,7 @@ public class LiquibaseAutoConfigurationTests {
 
 	@Test
 	public void testOverrideDefaultSchema() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.default-schema:public");
+		TestPropertyValues.of("spring.liquibase.default-schema:public").applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -128,7 +171,7 @@ public class LiquibaseAutoConfigurationTests {
 
 	@Test
 	public void testOverrideDropFirst() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context, "liquibase.drop-first:true");
+		TestPropertyValues.of("spring.liquibase.drop-first:true").applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -139,21 +182,24 @@ public class LiquibaseAutoConfigurationTests {
 
 	@Test
 	public void testOverrideDataSource() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.url:jdbc:hsqldb:mem:liquibase", "liquibase.user:sa");
+		TestPropertyValues
+				.of("spring.liquibase.url:jdbc:hsqldb:mem:liquibase", "spring.liquibase.user:sa")
+				.applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
 		this.context.refresh();
 		SpringLiquibase liquibase = this.context.getBean(SpringLiquibase.class);
-		assertThat(liquibase.getDataSource().getConnection().getMetaData().getURL())
+		DataSource dataSource = liquibase.getDataSource();
+		assertThat(((HikariDataSource) dataSource).isClosed()).isTrue();
+		assertThat(((HikariDataSource) dataSource).getJdbcUrl())
 				.isEqualTo("jdbc:hsqldb:mem:liquibase");
 	}
 
 	@Test(expected = BeanCreationException.class)
 	public void testChangeLogDoesNotExist() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.change-log:classpath:/no-such-changelog.yaml");
+		TestPropertyValues.of("spring.liquibase.change-log:classpath:/no-such-changelog.yaml")
+				.applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -169,12 +215,12 @@ public class LiquibaseAutoConfigurationTests {
 		SpringLiquibase liquibase = this.context.getBean(SpringLiquibase.class);
 		Object log = ReflectionTestUtils.getField(liquibase, "log");
 		assertThat(log).isInstanceOf(CommonsLoggingLiquibaseLogger.class);
+		assertThat(this.outputCapture.toString()).doesNotContain(": liquibase:");
 	}
 
 	@Test
 	public void testOverrideLabels() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.labels:test, production");
+		TestPropertyValues.of("spring.liquibase.labels:test, production").applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -186,7 +232,7 @@ public class LiquibaseAutoConfigurationTests {
 	@Test
 	@SuppressWarnings("unchecked")
 	public void testOverrideParameters() throws Exception {
-		EnvironmentTestUtils.addEnvironment(this.context, "liquibase.parameters.foo:bar");
+		TestPropertyValues.of("spring.liquibase.parameters.foo:bar").applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -201,8 +247,8 @@ public class LiquibaseAutoConfigurationTests {
 	@Test
 	public void testRollbackFile() throws Exception {
 		File file = this.temp.newFile("rollback-file.sql");
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"liquibase.rollbackFile:" + file.getAbsolutePath());
+		TestPropertyValues.of("spring.liquibase.rollbackFile:" + file.getAbsolutePath())
+				.applyTo(this.context);
 		this.context.register(EmbeddedDataSourceConfiguration.class,
 				LiquibaseAutoConfiguration.class,
 				PropertyPlaceholderAutoConfiguration.class);
@@ -212,6 +258,36 @@ public class LiquibaseAutoConfigurationTests {
 		assertThat(actualFile).isEqualTo(file).exists();
 		String content = new String(FileCopyUtils.copyToByteArray(file));
 		assertThat(content).contains("DROP TABLE PUBLIC.customer;");
+	}
+
+	@Test
+	public void testLiquibaseDataSource() {
+		this.context.register(LiquibaseDataSourceConfiguration.class,
+				EmbeddedDataSourceConfiguration.class, LiquibaseAutoConfiguration.class,
+				PropertyPlaceholderAutoConfiguration.class);
+		this.context.refresh();
+		SpringLiquibase liquibase = this.context.getBean(SpringLiquibase.class);
+		assertThat(liquibase.getDataSource())
+				.isEqualTo(this.context.getBean("liquibaseDataSource"));
+	}
+
+	@Configuration
+	static class LiquibaseDataSourceConfiguration {
+
+		@Bean
+		@Primary
+		public DataSource normalDataSource() {
+			return DataSourceBuilder.create().url("jdbc:hsqldb:mem:normal").username("sa")
+					.build();
+		}
+
+		@LiquibaseDataSource
+		@Bean
+		public DataSource liquibaseDataSource() {
+			return DataSourceBuilder.create().url("jdbc:hsqldb:mem:liquibasetest")
+					.username("sa").build();
+		}
+
 	}
 
 }

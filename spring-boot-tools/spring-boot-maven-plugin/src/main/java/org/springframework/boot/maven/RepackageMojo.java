@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,15 @@ package org.springframework.boot.maven;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.jar.JarFile;
 
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugin.logging.Log;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
@@ -37,13 +35,16 @@ import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.MavenProjectHelper;
 import org.apache.maven.shared.artifact.filter.collection.ArtifactsFilter;
+import org.apache.maven.shared.artifact.filter.collection.ScopeFilter;
 
 import org.springframework.boot.loader.tools.DefaultLaunchScript;
 import org.springframework.boot.loader.tools.LaunchScript;
 import org.springframework.boot.loader.tools.Layout;
+import org.springframework.boot.loader.tools.LayoutFactory;
 import org.springframework.boot.loader.tools.Layouts;
 import org.springframework.boot.loader.tools.Libraries;
 import org.springframework.boot.loader.tools.Repackager;
+import org.springframework.boot.loader.tools.Repackager.MainClassTimeoutWarningListener;
 
 /**
  * Repackages existing JAR and WAR archives so that they can be executed from the command
@@ -56,8 +57,6 @@ import org.springframework.boot.loader.tools.Repackager;
  */
 @Mojo(name = "repackage", defaultPhase = LifecyclePhase.PACKAGE, requiresProject = true, threadSafe = true, requiresDependencyResolution = ResolutionScope.COMPILE_PLUS_RUNTIME, requiresDependencyCollection = ResolutionScope.COMPILE_PLUS_RUNTIME)
 public class RepackageMojo extends AbstractDependencyFilterMojo {
-
-	private static final long FIND_WARNING_TIMEOUT = TimeUnit.SECONDS.toMillis(10);
 
 	/**
 	 * The Maven project.
@@ -91,7 +90,7 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	 * Skip the execution.
 	 * @since 1.2
 	 */
-	@Parameter(property = "skip", defaultValue = "false")
+	@Parameter(property = "spring-boot.repackage.skip", defaultValue = "false")
 	private boolean skip;
 
 	/**
@@ -132,10 +131,19 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	private LayoutType layout;
 
 	/**
+	 * The layout factory that will be used to create the executable archive if no
+	 * explicit layout is set. Alternative layouts implementations can be provided by 3rd
+	 * parties.
+	 * @since 1.5
+	 */
+	@Parameter
+	private LayoutFactory layoutFactory;
+
+	/**
 	 * A list of the libraries that must be unpacked from fat jars in order to run.
 	 * Specify each library as a <code>&lt;dependency&gt;</code> with a
 	 * <code>&lt;groupId&gt;</code> and a <code>&lt;artifactId&gt;</code> and they will be
-	 * unpacked at runtime in <code>$TMPDIR/spring-boot-libs</code>.
+	 * unpacked at runtime.
 	 * @since 1.1
 	 */
 	@Parameter
@@ -144,6 +152,12 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	/**
 	 * Make a fully executable jar for *nix machines by prepending a launch script to the
 	 * jar.
+	 * <p>
+	 * Currently, some tools do not accept this format so you may not always be able to
+	 * use this technique. For example, <code>jar -xf</code> may silently fail to extract
+	 * a jar or war that has been made fully-executable. It is recommended that you only
+	 * enable this option if you intend to execute it directly, rather than running it
+	 * with <code>java -jar</code> or deploying it to a servlet container.
 	 * @since 1.3
 	 */
 	@Parameter(defaultValue = "false")
@@ -165,11 +179,18 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	private Properties embeddedLaunchScriptProperties;
 
 	/**
-	 * Exclude Spring Boot devtools.
+	 * Exclude Spring Boot devtools from the repackaged archive.
 	 * @since 1.3
 	 */
+	@Parameter(defaultValue = "true")
+	private boolean excludeDevtools = true;
+
+	/**
+	 * Include system scoped dependencies.
+	 * @since 1.4
+	 */
 	@Parameter(defaultValue = "false")
-	private boolean excludeDevtools;
+	public boolean includeSystemScope;
 
 	@Override
 	public void execute() throws MojoExecutionException, MojoFailureException {
@@ -215,7 +236,9 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	}
 
 	private Repackager getRepackager(File source) {
-		Repackager repackager = new LoggingRepackager(source, getLog());
+		Repackager repackager = new Repackager(source, this.layoutFactory);
+		repackager.addMainClassTimeoutWarningListener(
+				new LoggingMainClassTimeoutWarningListener());
 		repackager.setMainClass(this.mainClass);
 		if (this.layout != null) {
 			getLog().info("Layout: " + this.layout);
@@ -225,14 +248,18 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 	}
 
 	private ArtifactsFilter[] getAdditionalFilters() {
+		List<ArtifactsFilter> filters = new ArrayList<>();
 		if (this.excludeDevtools) {
 			Exclude exclude = new Exclude();
 			exclude.setGroupId("org.springframework.boot");
 			exclude.setArtifactId("spring-boot-devtools");
 			ExcludeFilter filter = new ExcludeFilter(exclude);
-			return new ArtifactsFilter[] { filter };
+			filters.add(filter);
 		}
-		return new ArtifactsFilter[] {};
+		if (!this.includeSystemScope) {
+			filters.add(new ScopeFilter(null, Artifact.SCOPE_SYSTEM));
+		}
+		return filters.toArray(new ArtifactsFilter[filters.size()]);
 	}
 
 	private LaunchScript getLaunchScript() throws IOException {
@@ -322,11 +349,6 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 		DIR(new Layouts.Expanded()),
 
 		/**
-		 * Module Layout.
-		 */
-		MODULE(new Layouts.Module()),
-
-		/**
 		 * No Layout.
 		 */
 		NONE(new Layouts.None());
@@ -343,30 +365,15 @@ public class RepackageMojo extends AbstractDependencyFilterMojo {
 
 	}
 
-	private static class LoggingRepackager extends Repackager {
-
-		private final Log log;
-
-		LoggingRepackager(File source, Log log) {
-			super(source);
-			this.log = log;
-		}
+	private class LoggingMainClassTimeoutWarningListener
+			implements MainClassTimeoutWarningListener {
 
 		@Override
-		protected String findMainMethod(JarFile source) throws IOException {
-			long startTime = System.currentTimeMillis();
-			try {
-				return super.findMainMethod(source);
-			}
-			finally {
-				long duration = System.currentTimeMillis() - startTime;
-				if (duration > FIND_WARNING_TIMEOUT) {
-					this.log.warn("Searching for the main-class is taking some time, "
-							+ "consider using the mainClass configuration "
-							+ "parameter");
-				}
-			}
+		public void handleTimeoutWarning(long duration, String mainMethod) {
+			getLog().warn("Searching for the main-class is taking some time, "
+					+ "consider using the mainClass configuration " + "parameter");
 		}
 
 	}
+
 }

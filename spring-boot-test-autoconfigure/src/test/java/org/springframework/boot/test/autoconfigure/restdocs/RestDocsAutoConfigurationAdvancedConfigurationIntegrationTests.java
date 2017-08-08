@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,11 +41,13 @@ import static org.springframework.restdocs.hypermedia.HypermediaDocumentation.li
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 /**
+ * Tests for {@link AutoConfigureRestDocs}.
+ *
  * @author Andy Wilkinson
  */
 @RunWith(SpringRunner.class)
-@WebMvcTest(RestDocsTestController.class)
-@AutoConfigureRestDocs(outputDir = "target/generated-snippets")
+@WebMvcTest(controllers = RestDocsTestController.class, secure = false)
+@AutoConfigureRestDocs
 public class RestDocsAutoConfigurationAdvancedConfigurationIntegrationTests {
 
 	@Before
@@ -57,13 +59,12 @@ public class RestDocsAutoConfigurationAdvancedConfigurationIntegrationTests {
 	private MockMvc mvc;
 
 	@Autowired
-	private RestDocumentationResultHandler document;
+	private RestDocumentationResultHandler documentationHandler;
 
 	@Test
 	public void snippetGeneration() throws Exception {
-		this.document.snippets(links(
-				linkWithRel("self").description("Canonical location of this resource")));
-		this.mvc.perform(get("/"));
+		this.mvc.perform(get("/")).andDo(this.documentationHandler.document(links(
+				linkWithRel("self").description("Canonical location of this resource"))));
 		File defaultSnippetsDir = new File(
 				"target/generated-snippets/snippet-generation");
 		assertThat(defaultSnippetsDir).exists();

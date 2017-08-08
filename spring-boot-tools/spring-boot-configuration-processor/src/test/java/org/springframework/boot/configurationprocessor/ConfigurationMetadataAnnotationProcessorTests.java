@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,18 +34,23 @@ import org.springframework.boot.configurationprocessor.metadata.ConfigurationMet
 import org.springframework.boot.configurationprocessor.metadata.ItemDeprecation;
 import org.springframework.boot.configurationprocessor.metadata.ItemHint;
 import org.springframework.boot.configurationprocessor.metadata.ItemMetadata;
+import org.springframework.boot.configurationprocessor.metadata.Metadata;
+import org.springframework.boot.configurationprocessor.metadata.TestJsonConverter;
 import org.springframework.boot.configurationsample.incremental.BarProperties;
 import org.springframework.boot.configurationsample.incremental.FooProperties;
 import org.springframework.boot.configurationsample.incremental.RenamedBarProperties;
 import org.springframework.boot.configurationsample.lombok.LombokExplicitProperties;
 import org.springframework.boot.configurationsample.lombok.LombokInnerClassProperties;
+import org.springframework.boot.configurationsample.lombok.LombokInnerClassWithGetterProperties;
 import org.springframework.boot.configurationsample.lombok.LombokSimpleDataProperties;
 import org.springframework.boot.configurationsample.lombok.LombokSimpleProperties;
 import org.springframework.boot.configurationsample.lombok.SimpleLombokPojo;
+import org.springframework.boot.configurationsample.method.DeprecatedMethodConfig;
 import org.springframework.boot.configurationsample.method.EmptyTypeMethodConfig;
 import org.springframework.boot.configurationsample.method.InvalidMethodConfig;
 import org.springframework.boot.configurationsample.method.MethodAndClassConfig;
 import org.springframework.boot.configurationsample.method.SimpleMethodConfig;
+import org.springframework.boot.configurationsample.simple.ClassWithNestedProperties;
 import org.springframework.boot.configurationsample.simple.DeprecatedSingleProperty;
 import org.springframework.boot.configurationsample.simple.HierarchicalProperties;
 import org.springframework.boot.configurationsample.simple.NotAnnotated;
@@ -56,11 +61,17 @@ import org.springframework.boot.configurationsample.simple.SimpleTypeProperties;
 import org.springframework.boot.configurationsample.specific.BoxingPojo;
 import org.springframework.boot.configurationsample.specific.BuilderPojo;
 import org.springframework.boot.configurationsample.specific.DeprecatedUnrelatedMethodPojo;
+import org.springframework.boot.configurationsample.specific.DoubleRegistrationProperties;
 import org.springframework.boot.configurationsample.specific.ExcludedTypesPojo;
+import org.springframework.boot.configurationsample.specific.GenericConfig;
 import org.springframework.boot.configurationsample.specific.InnerClassAnnotatedGetterConfig;
+import org.springframework.boot.configurationsample.specific.InnerClassHierarchicalProperties;
 import org.springframework.boot.configurationsample.specific.InnerClassProperties;
 import org.springframework.boot.configurationsample.specific.InnerClassRootConfig;
+import org.springframework.boot.configurationsample.specific.InvalidAccessorProperties;
+import org.springframework.boot.configurationsample.specific.InvalidDoubleRegistrationProperties;
 import org.springframework.boot.configurationsample.specific.SimplePojo;
+import org.springframework.boot.testsupport.compiler.TestCompiler;
 import org.springframework.util.FileCopyUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -282,6 +293,35 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 	}
 
 	@Test
+	public void deprecatedMethodConfig() throws Exception {
+		Class<DeprecatedMethodConfig> type = DeprecatedMethodConfig.class;
+		ConfigurationMetadata metadata = compile(type);
+		assertThat(metadata).has(Metadata.withGroup("foo").fromSource(type));
+		assertThat(metadata).has(Metadata.withProperty("foo.name", String.class)
+				.fromSource(DeprecatedMethodConfig.Foo.class)
+				.withDeprecation(null, null));
+		assertThat(metadata).has(Metadata.withProperty("foo.flag", Boolean.class)
+				.fromSource(DeprecatedMethodConfig.Foo.class)
+				.withDeprecation(null, null));
+	}
+
+	@Test
+	@SuppressWarnings("deprecation")
+	public void deprecatedMethodConfigOnClass() throws Exception {
+		Class<?> type = org.springframework.boot.configurationsample.method.DeprecatedClassMethodConfig.class;
+		ConfigurationMetadata metadata = compile(type);
+		assertThat(metadata).has(Metadata.withGroup("foo").fromSource(type));
+		assertThat(metadata).has(Metadata.withProperty("foo.name", String.class)
+				.fromSource(
+						org.springframework.boot.configurationsample.method.DeprecatedClassMethodConfig.Foo.class)
+				.withDeprecation(null, null));
+		assertThat(metadata).has(Metadata.withProperty("foo.flag", Boolean.class)
+				.fromSource(
+						org.springframework.boot.configurationsample.method.DeprecatedClassMethodConfig.Foo.class)
+				.withDeprecation(null, null));
+	}
+
+	@Test
 	public void innerClassRootConfig() throws Exception {
 		ConfigurationMetadata metadata = compile(InnerClassRootConfig.class);
 		assertThat(metadata).has(Metadata.withProperty("config.name"));
@@ -310,11 +350,43 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 	}
 
 	@Test
+	public void innerClassPropertiesHierarchical() throws Exception {
+		ConfigurationMetadata metadata = compile(InnerClassHierarchicalProperties.class);
+		assertThat(metadata).has(Metadata.withGroup("config.foo")
+				.ofType(InnerClassHierarchicalProperties.Foo.class));
+		assertThat(metadata).has(Metadata.withGroup("config.foo.bar")
+				.ofType(InnerClassHierarchicalProperties.Bar.class));
+		assertThat(metadata).has(Metadata.withGroup("config.foo.bar.baz")
+				.ofType(InnerClassHierarchicalProperties.Foo.Baz.class));
+		assertThat(metadata).has(Metadata.withProperty("config.foo.bar.baz.blah"));
+		assertThat(metadata).has(Metadata.withProperty("config.foo.bar.bling"));
+	}
+
+	@Test
 	public void innerClassAnnotatedGetterConfig() throws Exception {
 		ConfigurationMetadata metadata = compile(InnerClassAnnotatedGetterConfig.class);
 		assertThat(metadata).has(Metadata.withProperty("specific.value"));
 		assertThat(metadata).has(Metadata.withProperty("foo.name"));
 		assertThat(metadata).isNotEqualTo(Metadata.withProperty("specific.foo"));
+	}
+
+	@Test
+	public void nestedClassChildProperties() throws Exception {
+		ConfigurationMetadata metadata = compile(ClassWithNestedProperties.class);
+		assertThat(metadata).has(Metadata.withGroup("nestedChildProps")
+				.fromSource(ClassWithNestedProperties.NestedChildClass.class));
+		assertThat(metadata)
+				.has(Metadata
+						.withProperty("nestedChildProps.child-class-property",
+								Integer.class)
+						.fromSource(ClassWithNestedProperties.NestedChildClass.class)
+						.withDefaultValue(20));
+		assertThat(metadata)
+				.has(Metadata
+						.withProperty("nestedChildProps.parent-class-property",
+								Integer.class)
+						.fromSource(ClassWithNestedProperties.NestedChildClass.class)
+						.withDefaultValue(10));
 	}
 
 	@Test
@@ -332,6 +404,56 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 		assertThat(metadata).isNotEqualTo(Metadata.withProperty("excluded.print-writer"));
 		assertThat(metadata).isNotEqualTo(Metadata.withProperty("excluded.writer"));
 		assertThat(metadata).isNotEqualTo(Metadata.withProperty("excluded.writer-array"));
+	}
+
+	@Test
+	public void invalidAccessor() throws IOException {
+		ConfigurationMetadata metadata = compile(InvalidAccessorProperties.class);
+		assertThat(metadata).has(Metadata.withGroup("config"));
+		assertThat(metadata.getItems()).hasSize(1);
+	}
+
+	@Test
+	public void doubleRegistration() throws IOException {
+		ConfigurationMetadata metadata = compile(DoubleRegistrationProperties.class);
+		assertThat(metadata).has(Metadata.withGroup("one"));
+		assertThat(metadata).has(Metadata.withGroup("two"));
+		assertThat(metadata).has(Metadata.withProperty("one.value"));
+		assertThat(metadata).has(Metadata.withProperty("two.value"));
+		assertThat(metadata.getItems()).hasSize(4);
+	}
+
+	@Test
+	public void invalidDoubleRegistration() throws IOException {
+		this.thrown.expect(IllegalStateException.class);
+		this.thrown.expectMessage("Compilation failed");
+		compile(InvalidDoubleRegistrationProperties.class);
+	}
+
+	@Test
+	public void genericTypes() throws IOException {
+		ConfigurationMetadata metadata = compile(GenericConfig.class);
+		assertThat(metadata).has(Metadata.withGroup("generic").ofType(
+				"org.springframework.boot.configurationsample.specific.GenericConfig"));
+		assertThat(metadata).has(Metadata.withGroup("generic.foo").ofType(
+				"org.springframework.boot.configurationsample.specific.GenericConfig$Foo"));
+		assertThat(metadata).has(Metadata.withGroup("generic.foo.bar").ofType(
+				"org.springframework.boot.configurationsample.specific.GenericConfig$Bar"));
+		assertThat(metadata).has(Metadata.withGroup("generic.foo.bar.biz").ofType(
+				"org.springframework.boot.configurationsample.specific.GenericConfig$Bar$Biz"));
+		assertThat(metadata).has(Metadata.withProperty("generic.foo.name")
+				.ofType(String.class).fromSource(GenericConfig.Foo.class));
+		assertThat(metadata).has(Metadata.withProperty("generic.foo.string-to-bar")
+				.ofType("java.util.Map<java.lang.String,org.springframework.boot.configurationsample.specific.GenericConfig.Bar<java.lang.Integer>>")
+				.fromSource(GenericConfig.Foo.class));
+		assertThat(metadata).has(Metadata.withProperty("generic.foo.string-to-integer")
+				.ofType("java.util.Map<java.lang.String,java.lang.Integer>")
+				.fromSource(GenericConfig.Foo.class));
+		assertThat(metadata).has(Metadata.withProperty("generic.foo.bar.name")
+				.ofType("java.lang.String").fromSource(GenericConfig.Bar.class));
+		assertThat(metadata).has(Metadata.withProperty("generic.foo.bar.biz.name")
+				.ofType("java.lang.String").fromSource(GenericConfig.Bar.Biz.class));
+		assertThat(metadata.getItems()).hasSize(9);
 	}
 
 	@Test
@@ -382,6 +504,20 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 	}
 
 	@Test
+	public void lombokInnerClassWithGetterProperties() throws IOException {
+		ConfigurationMetadata metadata = compile(
+				LombokInnerClassWithGetterProperties.class);
+		assertThat(metadata).has(Metadata.withGroup("config")
+				.fromSource(LombokInnerClassWithGetterProperties.class));
+		assertThat(metadata).has(Metadata.withGroup("config.first")
+				.ofType(LombokInnerClassWithGetterProperties.Foo.class)
+				.fromSourceMethod("getFirst()")
+				.fromSource(LombokInnerClassWithGetterProperties.class));
+		assertThat(metadata).has(Metadata.withProperty("config.first.name"));
+		assertThat(metadata.getItems()).hasSize(3);
+	}
+
+	@Test
 	public void mergingOfAdditionalProperty() throws Exception {
 		ItemMetadata property = ItemMetadata.newProperty(null, "foo", "java.lang.String",
 				AdditionalMetadata.class.getName(), null, null, null, null);
@@ -420,14 +556,14 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 	@Test
 	public void mergeExistingPropertyDeprecation() throws Exception {
 		ItemMetadata property = ItemMetadata.newProperty("simple", "comparator", null,
-				null, null, null, null,
-				new ItemDeprecation("Don't use this.", "simple.complex-comparator"));
+				null, null, null, null, new ItemDeprecation("Don't use this.",
+						"simple.complex-comparator", "error"));
 		writeAdditionalMetadata(property);
 		ConfigurationMetadata metadata = compile(SimpleProperties.class);
 		assertThat(metadata)
 				.has(Metadata.withProperty("simple.comparator", "java.util.Comparator<?>")
-						.fromSource(SimpleProperties.class)
-						.withDeprecation("Don't use this.", "simple.complex-comparator"));
+						.fromSource(SimpleProperties.class).withDeprecation(
+								"Don't use this.", "simple.complex-comparator", "error"));
 		assertThat(metadata.getItems()).hasSize(4);
 	}
 
@@ -442,6 +578,19 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 				Metadata.withProperty("singledeprecated.name", String.class.getName())
 						.fromSource(DeprecatedSingleProperty.class)
 						.withDeprecation("Don't use this.", "single.name"));
+		assertThat(metadata.getItems()).hasSize(3);
+	}
+
+	@Test
+	public void mergeExistingPropertyDeprecationOverrideLevel() throws Exception {
+		ItemMetadata property = ItemMetadata.newProperty("singledeprecated", "name", null,
+				null, null, null, null, new ItemDeprecation(null, null, "error"));
+		writeAdditionalMetadata(property);
+		ConfigurationMetadata metadata = compile(DeprecatedSingleProperty.class);
+		assertThat(metadata).has(
+				Metadata.withProperty("singledeprecated.name", String.class.getName())
+						.fromSource(DeprecatedSingleProperty.class).withDeprecation(
+								"renamed", "singledeprecated.new-name", "error"));
 		assertThat(metadata.getItems()).hasSize(3);
 	}
 
@@ -526,8 +675,9 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 		JSONObject additionalMetadata = new JSONObject();
 		additionalMetadata.put("properties", properties);
 		FileWriter writer = new FileWriter(additionalMetadataFile);
-		additionalMetadata.write(writer);
+		writer.append(additionalMetadata.toString(2));
 		writer.flush();
+		writer.close();
 		ConfigurationMetadata metadata = compile(SimpleProperties.class);
 		assertThat(metadata).has(Metadata.withProperty("simple.comparator"));
 		assertThat(metadata).has(Metadata.withProperty("foo", String.class)
@@ -620,23 +770,28 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 		return processor.getMetadata();
 	}
 
-	private void writeAdditionalMetadata(ItemMetadata... metadata) throws IOException {
+	private void writeAdditionalMetadata(ItemMetadata... metadata) throws Exception {
+		TestJsonConverter converter = new TestJsonConverter();
 		File additionalMetadataFile = createAdditionalMetadataFile();
 		JSONObject additionalMetadata = new JSONObject();
-		additionalMetadata.put("properties", metadata);
+		JSONArray properties = new JSONArray();
+		for (ItemMetadata itemMetadata : metadata) {
+			properties.put(converter.toJsonObject(itemMetadata));
+		}
+		additionalMetadata.put("properties", properties);
 		writeMetadata(additionalMetadataFile, additionalMetadata);
 	}
 
-	private void writeAdditionalHints(ItemHint... hints) throws IOException {
+	private void writeAdditionalHints(ItemHint... hints) throws Exception {
+		TestJsonConverter converter = new TestJsonConverter();
 		File additionalMetadataFile = createAdditionalMetadataFile();
 		JSONObject additionalMetadata = new JSONObject();
-		additionalMetadata.put("hints", hints);
+		additionalMetadata.put("hints", converter.toJsonArray(Arrays.asList(hints)));
 		writeMetadata(additionalMetadataFile, additionalMetadata);
 	}
 
-	private void writePropertyDeprecation(ItemMetadata... items) throws IOException {
+	private void writePropertyDeprecation(ItemMetadata... items) throws Exception {
 		File additionalMetadataFile = createAdditionalMetadataFile();
-
 		JSONArray propertiesArray = new JSONArray();
 		for (ItemMetadata item : items) {
 			JSONObject jsonObject = new JSONObject();
@@ -672,14 +827,9 @@ public class ConfigurationMetadataAnnotationProcessorTests {
 		return additionalMetadataFile;
 	}
 
-	private void writeMetadata(File metadataFile, JSONObject metadata)
-			throws IOException {
-		FileWriter writer = new FileWriter(metadataFile);
-		try {
-			metadata.write(writer);
-		}
-		finally {
-			writer.close();
+	private void writeMetadata(File metadataFile, JSONObject metadata) throws Exception {
+		try (FileWriter writer = new FileWriter(metadataFile)) {
+			writer.append(metadata.toString(2));
 		}
 	}
 

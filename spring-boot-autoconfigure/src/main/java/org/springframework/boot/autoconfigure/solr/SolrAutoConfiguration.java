@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,6 @@
  */
 
 package org.springframework.boot.autoconfigure.solr;
-
-import java.io.IOException;
-
-import javax.annotation.PreDestroy;
 
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
@@ -51,13 +47,6 @@ public class SolrAutoConfiguration {
 		this.properties = properties;
 	}
 
-	@PreDestroy
-	public void close() throws IOException {
-		if (this.solrClient != null) {
-			this.solrClient.close();
-		}
-	}
-
 	@Bean
 	@ConditionalOnMissingBean
 	public SolrClient solrClient() {
@@ -67,9 +56,10 @@ public class SolrAutoConfiguration {
 
 	private SolrClient createSolrClient() {
 		if (StringUtils.hasText(this.properties.getZkHost())) {
-			return new CloudSolrClient(this.properties.getZkHost());
+			return new CloudSolrClient.Builder().withZkHost(this.properties.getZkHost())
+					.build();
 		}
-		return new HttpSolrClient(this.properties.getHost());
+		return new HttpSolrClient.Builder(this.properties.getHost()).build();
 	}
 
 }

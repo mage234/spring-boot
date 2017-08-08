@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@ import java.util.Map;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.web.LocalServerPort;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.autoconfigure.LocalManagementPort;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.annotation.DirtiesContext;
@@ -45,10 +47,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DirtiesContext
 public class ManagementAddressActuatorApplicationTests {
 
+	@Autowired
+	private SecurityProperties security;
+
 	@LocalServerPort
 	private int port = 9010;
 
-	@Value("${local.management.port}")
+	@LocalManagementPort
 	private int managementPort = 9011;
 
 	@Test
@@ -61,11 +66,16 @@ public class ManagementAddressActuatorApplicationTests {
 
 	@Test
 	public void testHealth() throws Exception {
-		ResponseEntity<String> entity = new TestRestTemplate().getForEntity(
-				"http://localhost:" + this.managementPort + "/admin/health",
-				String.class);
+		ResponseEntity<String> entity = new TestRestTemplate()
+				.withBasicAuth("user", getPassword())
+				.getForEntity("http://localhost:" + this.managementPort + "/admin/health",
+						String.class);
 		assertThat(entity.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat(entity.getBody()).contains("\"status\":\"UP\"");
+	}
+
+	private String getPassword() {
+		return this.security.getUser().getPassword();
 	}
 
 }

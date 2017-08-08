@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,16 @@ abstract class Definition {
 
 	private final MockReset reset;
 
-	Definition(String name, MockReset reset) {
+	private final boolean proxyTargetAware;
+
+	private final QualifierDefinition qualifier;
+
+	Definition(String name, MockReset reset, boolean proxyTargetAware,
+			QualifierDefinition qualifier) {
 		this.name = name;
 		this.reset = (reset != null ? reset : MockReset.AFTER);
+		this.proxyTargetAware = proxyTargetAware;
+		this.qualifier = qualifier;
 	}
 
 	/**
@@ -53,11 +60,30 @@ abstract class Definition {
 		return this.reset;
 	}
 
+	/**
+	 * Return if AOP advised beans should be proxy target aware.
+	 * @return if proxy target aware
+	 */
+	public boolean isProxyTargetAware() {
+		return this.proxyTargetAware;
+	}
+
+	/**
+	 * Return the qualifier or {@code null}.
+	 * @return the qualifier
+	 */
+	public QualifierDefinition getQualifier() {
+		return this.qualifier;
+	}
+
 	@Override
 	public int hashCode() {
 		int result = 1;
 		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.name);
 		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.reset);
+		result = MULTIPLIER * result
+				+ ObjectUtils.nullSafeHashCode(this.proxyTargetAware);
+		result = MULTIPLIER * result + ObjectUtils.nullSafeHashCode(this.qualifier);
 		return result;
 	}
 
@@ -71,8 +97,11 @@ abstract class Definition {
 		}
 		Definition other = (Definition) obj;
 		boolean result = true;
-		result &= ObjectUtils.nullSafeEquals(this.name, other.name);
-		result &= ObjectUtils.nullSafeEquals(this.reset, other.reset);
+		result = result && ObjectUtils.nullSafeEquals(this.name, other.name);
+		result = result && ObjectUtils.nullSafeEquals(this.reset, other.reset);
+		result = result && ObjectUtils.nullSafeEquals(this.proxyTargetAware,
+				other.proxyTargetAware);
+		result = result && ObjectUtils.nullSafeEquals(this.qualifier, other.qualifier);
 		return result;
 	}
 

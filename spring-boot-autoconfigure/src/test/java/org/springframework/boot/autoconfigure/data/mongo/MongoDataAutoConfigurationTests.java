@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.springframework.boot.autoconfigure.data.mongo;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Set;
 
@@ -26,12 +27,13 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import org.springframework.beans.factory.BeanCreationException;
-import org.springframework.beans.factory.UnsatisfiedDependencyException;
 import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
-import org.springframework.boot.autoconfigure.PropertyPlaceholderAutoConfiguration;
+import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.mongo.city.City;
+import org.springframework.boot.autoconfigure.data.mongo.country.Country;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
-import org.springframework.boot.test.util.EnvironmentTestUtils;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,8 +42,10 @@ import org.springframework.data.mapping.model.CamelCaseAbbreviatingFieldNamingSt
 import org.springframework.data.mapping.model.FieldNamingStrategy;
 import org.springframework.data.mapping.model.PropertyNameFieldNamingStrategy;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.convert.CustomConversions;
+import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
+import org.springframework.data.mongodb.core.mapping.BasicMongoPersistentEntity;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
+import org.springframework.data.mongodb.core.mapping.MongoPersistentProperty;
 import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -80,8 +84,8 @@ public class MongoDataAutoConfigurationTests {
 	@Test
 	public void gridFsTemplateExists() {
 		this.context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(this.context,
-				"spring.data.mongodb.gridFsDatabase:grid");
+		TestPropertyValues.of("spring.data.mongodb.gridFsDatabase:grid")
+				.applyTo(this.context);
 		this.context.register(PropertyPlaceholderAutoConfiguration.class,
 				MongoAutoConfiguration.class, MongoDataAutoConfiguration.class);
 		this.context.refresh();
@@ -131,20 +135,44 @@ public class MongoDataAutoConfigurationTests {
 			fail("Create FieldNamingStrategy interface should fail");
 		}
 		// We seem to have an inconsistent exception, accept either
-		catch (UnsatisfiedDependencyException ex) {
-			// Expected
-		}
 		catch (BeanCreationException ex) {
 			// Expected
 		}
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	public void entityScanShouldSetInitialEntitySet() throws Exception {
+		this.context = new AnnotationConfigApplicationContext();
+		this.context.register(EntityScanConfig.class,
+				PropertyPlaceholderAutoConfiguration.class, MongoAutoConfiguration.class,
+				MongoDataAutoConfiguration.class);
+		this.context.refresh();
+		MongoMappingContext mappingContext = this.context
+				.getBean(MongoMappingContext.class);
+		Set<Class<?>> initialEntitySet = (Set<Class<?>>) ReflectionTestUtils
+				.getField(mappingContext, "initialEntitySet");
+		assertThat(initialEntitySet).containsOnly(City.class, Country.class);
+	}
+
+	@Test
+	public void registersDefaultSimpleTypesWithMappingContext() {
+		this.context = new AnnotationConfigApplicationContext();
+		this.context.register(MongoAutoConfiguration.class,
+				MongoDataAutoConfiguration.class);
+		this.context.refresh();
+		MongoMappingContext context = this.context.getBean(MongoMappingContext.class);
+		BasicMongoPersistentEntity<?> entity = context.getPersistentEntity(Sample.class);
+		MongoPersistentProperty dateProperty = entity.getPersistentProperty("date");
+		assertThat(dateProperty.isEntity()).isFalse();
 	}
 
 	public void testFieldNamingStrategy(String strategy,
 			Class<? extends FieldNamingStrategy> expectedType) {
 		this.context = new AnnotationConfigApplicationContext();
 		if (strategy != null) {
-			EnvironmentTestUtils.addEnvironment(this.context,
-					"spring.data.mongodb.field-naming-strategy:" + strategy);
+			TestPropertyValues.of("spring.data.mongodb.field-naming-strategy:" + strategy)
+					.applyTo(this.context);
 		}
 		this.context.register(PropertyPlaceholderAutoConfiguration.class,
 				MongoAutoConfiguration.class, MongoDataAutoConfiguration.class);
@@ -168,9 +196,16 @@ public class MongoDataAutoConfigurationTests {
 	static class CustomConversionsConfig {
 
 		@Bean
-		public CustomConversions customConversions() {
-			return new CustomConversions(Arrays.asList(new MyConverter()));
+		public MongoCustomConversions customConversions() {
+			return new MongoCustomConversions(Arrays.asList(new MyConverter()));
 		}
+
+	}
+
+	@Configuration
+	@EntityScan("org.springframework.boot.autoconfigure.data.mongo")
+	static class EntityScanConfig {
+
 	}
 
 	private static class MyConverter implements Converter<Mongo, Boolean> {
@@ -179,6 +214,12 @@ public class MongoDataAutoConfigurationTests {
 		public Boolean convert(Mongo source) {
 			return null;
 		}
+
+	}
+
+	static class Sample {
+
+		LocalDateTime date;
 
 	}
 

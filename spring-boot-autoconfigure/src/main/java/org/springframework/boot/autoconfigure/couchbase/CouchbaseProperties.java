@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ package org.springframework.boot.autoconfigure.couchbase;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.util.StringUtils;
 
 /**
@@ -89,13 +88,10 @@ public class CouchbaseProperties {
 
 	public static class Env {
 
-		@NestedConfigurationProperty
 		private final Endpoints endpoints = new Endpoints();
 
-		@NestedConfigurationProperty
 		private final Ssl ssl = new Ssl();
 
-		@NestedConfigurationProperty
 		private final Timeouts timeouts = new Timeouts();
 
 		public Endpoints getEndpoints() {
@@ -115,12 +111,12 @@ public class CouchbaseProperties {
 	public static class Endpoints {
 
 		/**
-		 * Number of sockets per node against the Key/value service.
+		 * Number of sockets per node against the key/value service.
 		 */
 		private int keyValue = 1;
 
 		/**
-		 * Number of sockets per node against the Query (N1QL) service.
+		 * Number of sockets per node against the query (N1QL) service.
 		 */
 		private int query = 1;
 
@@ -218,6 +214,11 @@ public class CouchbaseProperties {
 		private long query = 7500;
 
 		/**
+		 * Socket connect connections timeout in milliseconds.
+		 */
+		private int socketConnect = 1000;
+
+		/**
 		 * Regular and geospatial view operations timeout in milliseconds.
 		 */
 		private long view = 7500;
@@ -244,6 +245,14 @@ public class CouchbaseProperties {
 
 		public void setQuery(long query) {
 			this.query = query;
+		}
+
+		public int getSocketConnect() {
+			return this.socketConnect;
+		}
+
+		public void setSocketConnect(int socketConnect) {
+			this.socketConnect = socketConnect;
 		}
 
 		public long getView() {

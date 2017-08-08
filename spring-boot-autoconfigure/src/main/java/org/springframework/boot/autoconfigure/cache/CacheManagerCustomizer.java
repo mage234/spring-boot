@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,11 @@ import org.springframework.cache.CacheManager;
  * Callback interface that can be implemented by beans wishing to customize the cache
  * manager before it is fully initialized, in particular to tune its configuration.
  *
- * @param <T> The type of the {@link CacheManager}
+ * @param <T> the type of the {@link CacheManager}
  * @author Stephane Nicoll
  * @since 1.3.3
  */
+@FunctionalInterface
 public interface CacheManagerCustomizer<T extends CacheManager> {
 
 	/**

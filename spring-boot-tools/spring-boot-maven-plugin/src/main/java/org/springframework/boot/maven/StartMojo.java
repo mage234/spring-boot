@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.springframework.boot.maven;
 
+import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.ConnectException;
@@ -87,25 +88,23 @@ public class StartMojo extends AbstractRunMojo {
 	private final Object lock = new Object();
 
 	@Override
-	protected void runWithForkedJvm(List<String> args)
+	protected void runWithForkedJvm(File workingDirectory, List<String> args)
 			throws MojoExecutionException, MojoFailureException {
-		RunProcess runProcess = runProcess(args);
+		RunProcess runProcess = runProcess(workingDirectory, args);
 		try {
 			waitForSpringApplication();
 		}
-		catch (MojoExecutionException ex) {
-			runProcess.kill();
-			throw ex;
-		}
-		catch (MojoFailureException ex) {
+		catch (MojoExecutionException | MojoFailureException ex) {
 			runProcess.kill();
 			throw ex;
 		}
 	}
 
-	private RunProcess runProcess(List<String> args) throws MojoExecutionException {
+	private RunProcess runProcess(File workingDirectory, List<String> args)
+			throws MojoExecutionException {
 		try {
-			RunProcess runProcess = new RunProcess(new JavaExecutable().toString());
+			RunProcess runProcess = new RunProcess(workingDirectory,
+					new JavaExecutable().toString());
 			runProcess.run(false, args.toArray(new String[args.size()]));
 			return runProcess;
 		}
@@ -129,7 +128,7 @@ public class StartMojo extends AbstractRunMojo {
 	protected RunArguments resolveJvmArguments() {
 		RunArguments jvmArguments = super.resolveJvmArguments();
 		if (isFork()) {
-			List<String> remoteJmxArguments = new ArrayList<String>();
+			List<String> remoteJmxArguments = new ArrayList<>();
 			remoteJmxArguments.add("-Dcom.sun.management.jmxremote");
 			remoteJmxArguments.add("-Dcom.sun.management.jmxremote.port=" + this.jmxPort);
 			remoteJmxArguments.add("-Dcom.sun.management.jmxremote.authenticate=false");
@@ -167,6 +166,7 @@ public class StartMojo extends AbstractRunMojo {
 					this.lock.wait(wait);
 				}
 				catch (InterruptedException ex) {
+					Thread.currentThread().interrupt();
 					throw new IllegalStateException(
 							"Interrupted while waiting for Spring Boot app to start.");
 				}
@@ -180,7 +180,7 @@ public class StartMojo extends AbstractRunMojo {
 	private void waitForSpringApplication()
 			throws MojoFailureException, MojoExecutionException {
 		try {
-			if (Boolean.TRUE.equals(isFork())) {
+			if (isFork()) {
 				waitForForkedSpringApplication();
 			}
 			else {
@@ -201,20 +201,17 @@ public class StartMojo extends AbstractRunMojo {
 			throws IOException, MojoFailureException, MojoExecutionException {
 		try {
 			getLog().debug("Connecting to local MBeanServer at port " + this.jmxPort);
-			JMXConnector connector = execute(this.wait, this.maxAttempts,
-					new CreateJmxConnector(this.jmxPort));
-			if (connector == null) {
-				throw new MojoExecutionException(
-						"JMX MBean server was not reachable before the configured "
-								+ "timeout (" + (this.wait * this.maxAttempts) + "ms");
-			}
-			getLog().debug("Connected to local MBeanServer at port " + this.jmxPort);
-			try {
+			try (JMXConnector connector = execute(this.wait, this.maxAttempts,
+					new CreateJmxConnector(this.jmxPort))) {
+				if (connector == null) {
+					throw new MojoExecutionException(
+							"JMX MBean server was not reachable before the configured "
+									+ "timeout (" + (this.wait * this.maxAttempts)
+									+ "ms");
+				}
+				getLog().debug("Connected to local MBeanServer at port " + this.jmxPort);
 				MBeanServerConnection connection = connector.getMBeanServerConnection();
 				doWaitForSpringApplication(connection);
-			}
-			finally {
-				connector.close();
 			}
 		}
 		catch (IOException ex) {
@@ -231,14 +228,7 @@ public class StartMojo extends AbstractRunMojo {
 		final SpringApplicationAdminClient client = new SpringApplicationAdminClient(
 				connection, this.jmxName);
 		try {
-			execute(this.wait, this.maxAttempts, new Callable<Boolean>() {
-
-				@Override
-				public Boolean call() throws Exception {
-					return (client.isReady() ? true : null);
-				}
-
-			});
+			execute(this.wait, this.maxAttempts, () -> (client.isReady() ? true : null));
 		}
 		catch (ReflectionException ex) {
 			throw new MojoExecutionException("Unable to retrieve 'ready' attribute",
@@ -275,6 +265,7 @@ public class StartMojo extends AbstractRunMojo {
 					this.lock.wait(wait);
 				}
 				catch (InterruptedException ex) {
+					Thread.currentThread().interrupt();
 					throw new IllegalStateException(
 							"Interrupted while waiting for Spring Boot app to start.");
 				}

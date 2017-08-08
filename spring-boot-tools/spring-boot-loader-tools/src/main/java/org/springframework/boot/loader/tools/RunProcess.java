@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package org.springframework.boot.loader.tools;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
@@ -41,13 +42,31 @@ public class RunProcess {
 
 	private static final long JUST_ENDED_LIMIT = 500;
 
+	private File workingDirectory;
+
 	private final String[] command;
 
 	private volatile Process process;
 
 	private volatile long endTime;
 
+	/**
+	 * Creates new {@link RunProcess} instance for the specified command.
+	 * @param command the program to execute and its arguments
+	 */
 	public RunProcess(String... command) {
+		this(null, command);
+	}
+
+	/**
+	 * Creates new {@link RunProcess} instance for the specified working directory and
+	 * command.
+	 * @param workingDirectory the working directory of the child process or {@code null}
+	 * to run in the working directory of the current Java process
+	 * @param command the program to execute and its arguments
+	 */
+	public RunProcess(File workingDirectory, String... command) {
+		this.workingDirectory = workingDirectory;
 		this.command = command;
 	}
 
@@ -58,6 +77,7 @@ public class RunProcess {
 	protected int run(boolean waitForProcess, Collection<String> args)
 			throws IOException {
 		ProcessBuilder builder = new ProcessBuilder(this.command);
+		builder.directory(this.workingDirectory);
 		builder.command().addAll(args);
 		builder.redirectErrorStream(true);
 		boolean inheritedIO = inheritIO(builder);
@@ -67,12 +87,7 @@ public class RunProcess {
 			if (!inheritedIO) {
 				redirectOutput(process);
 			}
-			SignalUtils.attachSignalHandler(new Runnable() {
-				@Override
-				public void run() {
-					handleSigInt();
-				}
-			});
+			SignalUtils.attachSignalHandler(this::handleSigInt);
 			if (waitForProcess) {
 				try {
 					return process.waitFor();
@@ -134,25 +149,20 @@ public class RunProcess {
 	private void redirectOutput(Process process) {
 		final BufferedReader reader = new BufferedReader(
 				new InputStreamReader(process.getInputStream()));
-		new Thread() {
-
-			@Override
-			public void run() {
-				try {
-					String line = reader.readLine();
-					while (line != null) {
-						System.out.println(line);
-						line = reader.readLine();
-						System.out.flush();
-					}
-					reader.close();
+		new Thread(() -> {
+			try {
+				String line = reader.readLine();
+				while (line != null) {
+					System.out.println(line);
+					line = reader.readLine();
+					System.out.flush();
 				}
-				catch (Exception ex) {
-					// Ignore
-				}
+				reader.close();
 			}
-
-		}.start();
+			catch (Exception ex) {
+				// Ignore
+			}
+		}).start();
 	}
 
 	/**

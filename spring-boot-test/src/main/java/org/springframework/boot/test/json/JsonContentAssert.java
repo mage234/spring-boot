@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 package org.springframework.boot.test.json;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Map;
 
@@ -26,11 +26,11 @@ import com.jayway.jsonpath.JsonPath;
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.AbstractBooleanAssert;
 import org.assertj.core.api.AbstractCharSequenceAssert;
-import org.assertj.core.api.AbstractListAssert;
-import org.assertj.core.api.AbstractMapAssert;
 import org.assertj.core.api.AbstractObjectAssert;
 import org.assertj.core.api.Assert;
 import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ListAssert;
+import org.assertj.core.api.MapAssert;
 import org.skyscreamer.jsonassert.JSONCompare;
 import org.skyscreamer.jsonassert.JSONCompareMode;
 import org.skyscreamer.jsonassert.JSONCompareResult;
@@ -44,6 +44,7 @@ import org.springframework.util.StringUtils;
  * AssertJ {@link Assert} for {@link JsonContent}.
  *
  * @author Phillip Webb
+ * @author Andy Wilkinson
  * @since 1.4.0
  */
 public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSequence> {
@@ -51,13 +52,26 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	private final JsonLoader loader;
 
 	/**
-	 * Create a new {@link JsonContentAssert} instance.
+	 * Create a new {@link JsonContentAssert} instance that will load resources as UTF-8.
 	 * @param resourceLoadClass the source class used to load resources
 	 * @param json the actual JSON content
 	 */
 	public JsonContentAssert(Class<?> resourceLoadClass, CharSequence json) {
+		this(resourceLoadClass, null, json);
+	}
+
+	/**
+	 * Create a new {@link JsonContentAssert} instance that will load resources in the
+	 * given {@code charset}.
+	 * @param resourceLoadClass the source class used to load resources
+	 * @param charset the charset of the JSON resources
+	 * @param json the actual JSON content
+	 * @since 1.4.1
+	 */
+	public JsonContentAssert(Class<?> resourceLoadClass, Charset charset,
+			CharSequence json) {
 		super(json, JsonContentAssert.class);
-		this.loader = new JsonLoader(resourceLoadClass);
+		this.loader = new JsonLoader(resourceLoadClass, charset);
 	}
 
 	/**
@@ -67,28 +81,22 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 */
 	@Override
 	public JsonContentAssert isEqualTo(Object expected) {
-		try {
-			if (expected == null || expected instanceof CharSequence) {
-				return isEqualToJson((CharSequence) expected);
-			}
-			if (expected instanceof byte[]) {
-				return isEqualToJson((byte[]) expected);
-			}
-			if (expected instanceof File) {
-				return isEqualToJson((File) expected);
-			}
-			if (expected instanceof InputStream) {
-				return isEqualToJson((InputStream) expected);
-			}
-			if (expected instanceof Resource) {
-				return isEqualToJson((Resource) expected);
-			}
-			throw new AssertionError(
-					"Unsupport type for JSON assert " + expected.getClass());
+		if (expected == null || expected instanceof CharSequence) {
+			return isEqualToJson((CharSequence) expected);
 		}
-		catch (IOException ex) {
-			throw new IllegalStateException(ex);
+		if (expected instanceof byte[]) {
+			return isEqualToJson((byte[]) expected);
 		}
+		if (expected instanceof File) {
+			return isEqualToJson((File) expected);
+		}
+		if (expected instanceof InputStream) {
+			return isEqualToJson((InputStream) expected);
+		}
+		if (expected instanceof Resource) {
+			return isEqualToJson((Resource) expected);
+		}
+		throw new AssertionError("Unsupport type for JSON assert " + expected.getClass());
 	}
 
 	/**
@@ -99,10 +107,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON or the name of a resource containing the expected
 	 * JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(CharSequence expected) throws IOException {
+	public JsonContentAssert isEqualToJson(CharSequence expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -113,11 +120,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param path the name of a resource containing the expected JSON
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(String path, Class<?> resourceLoadClass)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(String path, Class<?> resourceLoadClass) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -127,10 +132,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON bytes.
 	 * @param expected the expected JSON bytes
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(byte[] expected) throws IOException {
+	public JsonContentAssert isEqualToJson(byte[] expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -140,10 +144,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON file.
 	 * @param expected a file containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(File expected) throws IOException {
+	public JsonContentAssert isEqualToJson(File expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -153,10 +156,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON input stream.
 	 * @param expected an input stream containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(InputStream expected) throws IOException {
+	public JsonContentAssert isEqualToJson(InputStream expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -166,10 +168,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON resource.
 	 * @param expected a resource containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(Resource expected) throws IOException {
+	public JsonContentAssert isEqualToJson(Resource expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -182,11 +183,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON or the name of a resource containing the expected
 	 * JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isStrictlyEqualToJson(CharSequence expected)
-			throws IOException {
+	public JsonContentAssert isStrictlyEqualToJson(CharSequence expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -197,11 +196,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param path the name of a resource containing the expected JSON
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isStrictlyEqualToJson(String path,
-			Class<?> resourceLoadClass) throws IOException {
+			Class<?> resourceLoadClass) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -211,10 +209,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * the specified JSON bytes.
 	 * @param expected the expected JSON bytes
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isStrictlyEqualToJson(byte[] expected) throws IOException {
+	public JsonContentAssert isStrictlyEqualToJson(byte[] expected) {
 		return assertNotFailed(
 				compare(this.loader.getJson(expected), JSONCompareMode.STRICT));
 	}
@@ -224,10 +221,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * the specified JSON file.
 	 * @param expected a file containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isStrictlyEqualToJson(File expected) throws IOException {
+	public JsonContentAssert isStrictlyEqualToJson(File expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -237,11 +233,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * the specified JSON input stream.
 	 * @param expected an input stream containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isStrictlyEqualToJson(InputStream expected)
-			throws IOException {
+	public JsonContentAssert isStrictlyEqualToJson(InputStream expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -251,10 +245,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * the specified JSON resource.
 	 * @param expected a resource containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isStrictlyEqualToJson(Resource expected) throws IOException {
+	public JsonContentAssert isStrictlyEqualToJson(Resource expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -267,11 +260,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(CharSequence expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, compareMode));
 	}
@@ -282,11 +274,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(String path, Class<?> resourceLoadClass,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotFailed(compare(expectedJson, compareMode));
 	}
@@ -296,11 +287,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON bytes
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(byte[] expected, JSONCompareMode compareMode)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(byte[] expected, JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, compareMode));
 	}
@@ -310,11 +299,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a file containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(File expected, JSONCompareMode compareMode)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(File expected, JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, compareMode));
 	}
@@ -324,11 +311,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected an input stream containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(InputStream expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		return assertNotFailed(compare(this.loader.getJson(expected), compareMode));
 	}
 
@@ -337,11 +323,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a resource containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(Resource expected, JSONCompareMode compareMode)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(Resource expected,
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, compareMode));
 	}
@@ -354,11 +339,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(CharSequence expected,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -369,11 +353,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(String path, Class<?> resourceLoadClass,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -383,11 +366,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON bytes
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(byte[] expected, JSONComparator comparator)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(byte[] expected, JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -397,11 +378,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a file containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(File expected, JSONComparator comparator)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(File expected, JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -411,11 +390,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected an input stream containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
 	public JsonContentAssert isEqualToJson(InputStream expected,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -425,11 +403,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a resource containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is not equal to the given one
 	 */
-	public JsonContentAssert isEqualToJson(Resource expected, JSONComparator comparator)
-			throws IOException {
+	public JsonContentAssert isEqualToJson(Resource expected, JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotFailed(compare(expectedJson, comparator));
 	}
@@ -441,28 +417,22 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 */
 	@Override
 	public JsonContentAssert isNotEqualTo(Object expected) {
-		try {
-			if (expected == null || expected instanceof CharSequence) {
-				return isNotEqualToJson((CharSequence) expected);
-			}
-			if (expected instanceof byte[]) {
-				return isNotEqualToJson((byte[]) expected);
-			}
-			if (expected instanceof File) {
-				return isNotEqualToJson((File) expected);
-			}
-			if (expected instanceof InputStream) {
-				return isNotEqualToJson((InputStream) expected);
-			}
-			if (expected instanceof Resource) {
-				return isNotEqualToJson((Resource) expected);
-			}
-			throw new AssertionError(
-					"Unsupport type for JSON assert " + expected.getClass());
+		if (expected == null || expected instanceof CharSequence) {
+			return isNotEqualToJson((CharSequence) expected);
 		}
-		catch (IOException ex) {
-			throw new IllegalStateException(ex);
+		if (expected instanceof byte[]) {
+			return isNotEqualToJson((byte[]) expected);
 		}
+		if (expected instanceof File) {
+			return isNotEqualToJson((File) expected);
+		}
+		if (expected instanceof InputStream) {
+			return isNotEqualToJson((InputStream) expected);
+		}
+		if (expected instanceof Resource) {
+			return isNotEqualToJson((Resource) expected);
+		}
+		throw new AssertionError("Unsupport type for JSON assert " + expected.getClass());
 	}
 
 	/**
@@ -473,10 +443,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON or the name of a resource containing the expected
 	 * JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(CharSequence expected) throws IOException {
+	public JsonContentAssert isNotEqualToJson(CharSequence expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -487,11 +456,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param path the name of a resource containing the expected JSON
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(String path, Class<?> resourceLoadClass)
-			throws IOException {
+	public JsonContentAssert isNotEqualToJson(String path, Class<?> resourceLoadClass) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -501,10 +468,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * equal to the specified JSON bytes.
 	 * @param expected the expected JSON bytes
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(byte[] expected) throws IOException {
+	public JsonContentAssert isNotEqualToJson(byte[] expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -514,10 +480,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * equal to the specified JSON file.
 	 * @param expected a file containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(File expected) throws IOException {
+	public JsonContentAssert isNotEqualToJson(File expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -527,10 +492,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * equal to the specified JSON input stream.
 	 * @param expected an input stream containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(InputStream expected) throws IOException {
+	public JsonContentAssert isNotEqualToJson(InputStream expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.LENIENT));
 	}
@@ -540,10 +504,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * equal to the specified JSON resource.
 	 * @param expected a resource containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(Resource expected) throws IOException {
+	public JsonContentAssert isNotEqualToJson(Resource expected) {
 		return assertNotPassed(
 				compare(this.loader.getJson(expected), JSONCompareMode.LENIENT));
 	}
@@ -556,11 +519,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON or the name of a resource containing the expected
 	 * JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotStrictlyEqualToJson(CharSequence expected)
-			throws IOException {
+	public JsonContentAssert isNotStrictlyEqualToJson(CharSequence expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -571,11 +532,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param path the name of a resource containing the expected JSON
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotStrictlyEqualToJson(String path,
-			Class<?> resourceLoadClass) throws IOException {
+			Class<?> resourceLoadClass) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -585,11 +545,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON bytes.
 	 * @param expected the expected JSON bytes
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotStrictlyEqualToJson(byte[] expected)
-			throws IOException {
+	public JsonContentAssert isNotStrictlyEqualToJson(byte[] expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -599,10 +557,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON file.
 	 * @param expected a file containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotStrictlyEqualToJson(File expected) throws IOException {
+	public JsonContentAssert isNotStrictlyEqualToJson(File expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -612,11 +569,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON input stream.
 	 * @param expected an input stream containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotStrictlyEqualToJson(InputStream expected)
-			throws IOException {
+	public JsonContentAssert isNotStrictlyEqualToJson(InputStream expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -626,11 +581,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * to the specified JSON resource.
 	 * @param expected a resource containing the expected JSON
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotStrictlyEqualToJson(Resource expected)
-			throws IOException {
+	public JsonContentAssert isNotStrictlyEqualToJson(Resource expected) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, JSONCompareMode.STRICT));
 	}
@@ -643,11 +596,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(CharSequence expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -658,11 +610,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(String path, Class<?> resourceLoadClass,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -672,11 +623,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON bytes
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(byte[] expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -686,11 +636,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a file containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(File expected, JSONCompareMode compareMode)
-			throws IOException {
+	public JsonContentAssert isNotEqualToJson(File expected,
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -700,11 +649,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected an input stream containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(InputStream expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -714,11 +662,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a resource containing the expected JSON
 	 * @param compareMode the compare mode used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(Resource expected,
-			JSONCompareMode compareMode) throws IOException {
+			JSONCompareMode compareMode) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, compareMode));
 	}
@@ -731,11 +678,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(CharSequence expected,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -746,11 +692,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param resourceLoadClass the source class used to load the resource
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(String path, Class<?> resourceLoadClass,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(path, resourceLoadClass);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -760,11 +705,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected the expected JSON bytes
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(byte[] expected, JSONComparator comparator)
-			throws IOException {
+	public JsonContentAssert isNotEqualToJson(byte[] expected,
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -774,11 +718,9 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a file containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
-	public JsonContentAssert isNotEqualToJson(File expected, JSONComparator comparator)
-			throws IOException {
+	public JsonContentAssert isNotEqualToJson(File expected, JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -788,11 +730,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected an input stream containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(InputStream expected,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -802,11 +743,10 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expected a resource containing the expected JSON
 	 * @param comparator the comparator used when checking
 	 * @return {@code this} assertion object
-	 * @throws IOException on IO error
 	 * @throws AssertionError if the actual JSON value is equal to the given one
 	 */
 	public JsonContentAssert isNotEqualToJson(Resource expected,
-			JSONComparator comparator) throws IOException {
+			JSONComparator comparator) {
 		String expectedJson = this.loader.getJson(expected);
 		return assertNotPassed(compare(expectedJson, comparator));
 	}
@@ -918,7 +858,7 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	/**
 	 * Verify that the actual value at the given JSON path produces no result. If the JSON
 	 * path expression is not {@linkplain JsonPath#isDefinite() definite}, this method
-	 * verifies that the value at the given path is not <em>empty</em>.
+	 * verifies that the value at the given path is <em>empty</em>.
 	 * @param expression the {@link JsonPath} expression
 	 * @param args arguments to parameterize the {@code JsonPath} expression with, using
 	 * formatting specifiers defined in {@link String#format(String, Object...)}
@@ -1006,12 +946,13 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expression the {@link JsonPath} expression
 	 * @param args arguments to parameterize the {@code JsonPath} expression with, using
 	 * formatting specifiers defined in {@link String#format(String, Object...)}
+	 * @param <E> element type
 	 * @return a new assertion object whose object under test is the extracted item
 	 * @throws AssertionError if the path is not valid or does not result in an array
 	 */
 	@SuppressWarnings("unchecked")
-	public AbstractListAssert<?, ?, Object> extractingJsonPathArrayValue(
-			CharSequence expression, Object... args) {
+	public <E> ListAssert<E> extractingJsonPathArrayValue(CharSequence expression,
+			Object... args) {
 		return Assertions.assertThat(
 				extractingJsonPathValue(expression, args, List.class, "an array"));
 	}
@@ -1021,12 +962,14 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 	 * @param expression the {@link JsonPath} expression
 	 * @param args arguments to parameterize the {@code JsonPath} expression with, using
 	 * formatting specifiers defined in {@link String#format(String, Object...)}
+	 * @param <K> key type
+	 * @param <V> value type
 	 * @return a new assertion object whose object under test is the extracted item
 	 * @throws AssertionError if the path is not valid or does not result in a map
 	 */
 	@SuppressWarnings("unchecked")
-	public AbstractMapAssert<?, ?, Object, Object> extractingJsonPathMapValue(
-			CharSequence expression, Object... args) {
+	public <K, V> MapAssert<K, V> extractingJsonPathMapValue(CharSequence expression,
+			Object... args) {
 		return Assertions.assertThat(
 				extractingJsonPathValue(expression, args, Map.class, "a map"));
 	}
@@ -1046,9 +989,17 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 		if (this.actual == null) {
 			return compareForNull(expectedJson);
 		}
-		return JSONCompare.compareJSON(
-				(expectedJson == null ? null : expectedJson.toString()),
-				this.actual.toString(), compareMode);
+		try {
+			return JSONCompare.compareJSON(
+					(expectedJson == null ? null : expectedJson.toString()),
+					this.actual.toString(), compareMode);
+		}
+		catch (Exception ex) {
+			if (ex instanceof RuntimeException) {
+				throw (RuntimeException) ex;
+			}
+			throw new IllegalStateException(ex);
+		}
 	}
 
 	private JSONCompareResult compare(CharSequence expectedJson,
@@ -1056,16 +1007,24 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 		if (this.actual == null) {
 			return compareForNull(expectedJson);
 		}
-		return JSONCompare.compareJSON(
-				(expectedJson == null ? null : expectedJson.toString()),
-				this.actual.toString(), comparator);
+		try {
+			return JSONCompare.compareJSON(
+					(expectedJson == null ? null : expectedJson.toString()),
+					this.actual.toString(), comparator);
+		}
+		catch (Exception ex) {
+			if (ex instanceof RuntimeException) {
+				throw (RuntimeException) ex;
+			}
+			throw new IllegalStateException(ex);
+		}
 	}
 
 	private JSONCompareResult compareForNull(CharSequence expectedJson) {
 		JSONCompareResult result = new JSONCompareResult();
 		result.passed();
 		if (expectedJson != null) {
-			result.fail("Expected non-null JSON");
+			result.fail("Expected null JSON");
 		}
 		return result;
 	}
@@ -1154,7 +1113,7 @@ public class JsonContentAssert extends AbstractAssert<JsonContentAssert, CharSeq
 				if (!required) {
 					return null;
 				}
-				throw new AssertionError(getNoValueMessage() + ex.getMessage());
+				throw new AssertionError(getNoValueMessage() + ". " + ex.getMessage());
 			}
 		}
 

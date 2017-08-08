@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,34 +17,26 @@
 package org.springframework.boot.autoconfigure.data.mongo;
 
 import java.net.UnknownHostException;
-import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
 
 import com.mongodb.DB;
 import com.mongodb.Mongo;
 import com.mongodb.MongoClient;
+import com.mongodb.client.MongoDatabase;
 
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.BeanClassLoaderAware;
 import org.springframework.beans.factory.BeanFactory;
-import org.springframework.beans.factory.NoSuchBeanDefinitionException;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.domain.EntityScanner;
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
 import org.springframework.boot.autoconfigure.mongo.MongoProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
-import org.springframework.core.io.ResourceLoader;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.support.PersistenceExceptionTranslator;
 import org.springframework.data.annotation.Persistent;
@@ -52,16 +44,15 @@ import org.springframework.data.mapping.model.FieldNamingStrategy;
 import org.springframework.data.mongodb.MongoDbFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
-import org.springframework.data.mongodb.core.convert.CustomConversions;
 import org.springframework.data.mongodb.core.convert.DbRefResolver;
 import org.springframework.data.mongodb.core.convert.DefaultDbRefResolver;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
+import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
 import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.util.Assert;
-import org.springframework.util.ClassUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -78,32 +69,23 @@ import org.springframework.util.StringUtils;
  * @author Josh Long
  * @author Phillip Webb
  * @author Eddú Meléndez
+ * @author Stephane Nicoll
  * @since 1.1.0
  */
 @Configuration
 @ConditionalOnClass({ Mongo.class, MongoTemplate.class })
 @EnableConfigurationProperties(MongoProperties.class)
 @AutoConfigureAfter(MongoAutoConfiguration.class)
-public class MongoDataAutoConfiguration implements BeanClassLoaderAware {
+public class MongoDataAutoConfiguration {
+
+	private final ApplicationContext applicationContext;
 
 	private final MongoProperties properties;
 
-	private final Environment environment;
-
-	private final ResourceLoader resourceLoader;
-
-	private ClassLoader classLoader;
-
-	public MongoDataAutoConfiguration(MongoProperties properties, Environment environment,
-			ResourceLoader resourceLoader) {
+	public MongoDataAutoConfiguration(ApplicationContext applicationContext,
+			MongoProperties properties) {
+		this.applicationContext = applicationContext;
 		this.properties = properties;
-		this.environment = environment;
-		this.resourceLoader = resourceLoader;
-	}
-
-	@Override
-	public void setBeanClassLoader(ClassLoader classLoader) {
-		this.classLoader = classLoader;
 	}
 
 	@Bean
@@ -123,63 +105,29 @@ public class MongoDataAutoConfiguration implements BeanClassLoaderAware {
 	@Bean
 	@ConditionalOnMissingBean(MongoConverter.class)
 	public MappingMongoConverter mappingMongoConverter(MongoDbFactory factory,
-			MongoMappingContext context, BeanFactory beanFactory) {
+			MongoMappingContext context, BeanFactory beanFactory,
+			MongoCustomConversions conversions) {
 		DbRefResolver dbRefResolver = new DefaultDbRefResolver(factory);
 		MappingMongoConverter mappingConverter = new MappingMongoConverter(dbRefResolver,
 				context);
-		try {
-			mappingConverter
-					.setCustomConversions(beanFactory.getBean(CustomConversions.class));
-		}
-		catch (NoSuchBeanDefinitionException ex) {
-			// Ignore
-		}
+		mappingConverter.setCustomConversions(conversions);
 		return mappingConverter;
 	}
 
 	@Bean
 	@ConditionalOnMissingBean
-	public MongoMappingContext mongoMappingContext(BeanFactory beanFactory)
-			throws ClassNotFoundException {
+	public MongoMappingContext mongoMappingContext(BeanFactory beanFactory,
+			MongoCustomConversions conversions) throws ClassNotFoundException {
 		MongoMappingContext context = new MongoMappingContext();
-		context.setInitialEntitySet(getInitialEntitySet(beanFactory));
+		context.setInitialEntitySet(new EntityScanner(this.applicationContext)
+				.scan(Document.class, Persistent.class));
 		Class<?> strategyClass = this.properties.getFieldNamingStrategy();
 		if (strategyClass != null) {
 			context.setFieldNamingStrategy(
-					(FieldNamingStrategy) BeanUtils.instantiate(strategyClass));
+					(FieldNamingStrategy) BeanUtils.instantiateClass(strategyClass));
 		}
+		context.setSimpleTypeHolder(conversions.getSimpleTypeHolder());
 		return context;
-	}
-
-	private Set<Class<?>> getInitialEntitySet(BeanFactory beanFactory)
-			throws ClassNotFoundException {
-		Set<Class<?>> entitySet = new HashSet<Class<?>>();
-		ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(
-				false);
-		scanner.setEnvironment(this.environment);
-		scanner.setResourceLoader(this.resourceLoader);
-		scanner.addIncludeFilter(new AnnotationTypeFilter(Document.class));
-		scanner.addIncludeFilter(new AnnotationTypeFilter(Persistent.class));
-		for (String basePackage : getMappingBasePackages(beanFactory)) {
-			if (StringUtils.hasText(basePackage)) {
-				for (BeanDefinition candidate : scanner
-						.findCandidateComponents(basePackage)) {
-					entitySet.add(ClassUtils.forName(candidate.getBeanClassName(),
-							this.classLoader));
-				}
-			}
-		}
-		return entitySet;
-	}
-
-	private static Collection<String> getMappingBasePackages(BeanFactory beanFactory) {
-		try {
-			return AutoConfigurationPackages.get(beanFactory);
-		}
-		catch (IllegalStateException ex) {
-			// no auto-configuration package registered yet
-			return Collections.emptyList();
-		}
 	}
 
 	@Bean
@@ -189,6 +137,12 @@ public class MongoDataAutoConfiguration implements BeanClassLoaderAware {
 		return new GridFsTemplate(
 				new GridFsMongoDbFactory(mongoDbFactory, this.properties),
 				mongoTemplate.getConverter());
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public MongoCustomConversions mongoCustomConversions() {
+		return new MongoCustomConversions(Collections.emptyList());
 	}
 
 	/**
@@ -209,7 +163,7 @@ public class MongoDataAutoConfiguration implements BeanClassLoaderAware {
 		}
 
 		@Override
-		public DB getDb() throws DataAccessException {
+		public MongoDatabase getDb() throws DataAccessException {
 			String gridFsDatabase = this.properties.getGridFsDatabase();
 			if (StringUtils.hasText(gridFsDatabase)) {
 				return this.mongoDbFactory.getDb(gridFsDatabase);
@@ -218,13 +172,18 @@ public class MongoDataAutoConfiguration implements BeanClassLoaderAware {
 		}
 
 		@Override
-		public DB getDb(String dbName) throws DataAccessException {
+		public MongoDatabase getDb(String dbName) throws DataAccessException {
 			return this.mongoDbFactory.getDb(dbName);
 		}
 
 		@Override
 		public PersistenceExceptionTranslator getExceptionTranslator() {
 			return this.mongoDbFactory.getExceptionTranslator();
+		}
+
+		@Override
+		public DB getLegacyDb() {
+			return this.mongoDbFactory.getLegacyDb();
 		}
 
 	}

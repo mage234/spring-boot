@@ -107,13 +107,15 @@ public class PropertyMappingContextCustomizerFactoryTests {
 		context.register(ConfigMapping.class);
 		customizer.customizeContext(context, null);
 		this.thrown.expect(BeanCreationException.class);
-		this.thrown.expectMessage(
-				"@PropertyMapping annotations can only be used on test classes");
+		this.thrown.expectMessage("The @PropertyMapping annotation "
+				+ "@PropertyMappingContextCustomizerFactoryTests.TypeMappingAnnotation "
+				+ "cannot be used in combination with the @Component annotation @Configuration");
 		context.refresh();
 	}
 
 	@NoMappingAnnotation
 	static class NoMapping {
+
 	}
 
 	@Retention(RetentionPolicy.RUNTIME)
@@ -123,6 +125,7 @@ public class PropertyMappingContextCustomizerFactoryTests {
 
 	@TypeMappingAnnotation
 	static class TypeMapping {
+
 	}
 
 	@Configuration
@@ -141,10 +144,12 @@ public class PropertyMappingContextCustomizerFactoryTests {
 
 	@AttributeMappingAnnotation
 	static class AttributeMapping {
+
 	}
 
 	@AttributeMappingAnnotation("Other")
 	static class OtherMapping {
+
 	}
 
 	@Retention(RetentionPolicy.RUNTIME)

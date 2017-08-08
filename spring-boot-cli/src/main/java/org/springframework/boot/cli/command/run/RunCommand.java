@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2014 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,8 @@ public class RunCommand extends OptionParsingCommand {
 
 	private static class RunOptionHandler extends CompilerOptionHandler {
 
+		private final Object monitor = new Object();
+
 		private OptionSpec<Void> watchOption;
 
 		private OptionSpec<Void> verboseOption;
@@ -77,36 +79,39 @@ public class RunCommand extends OptionParsingCommand {
 			this.quietOption = option(Arrays.asList("quiet", "q"), "Quiet logging");
 		}
 
-		public synchronized void stop() {
-			if (this.runner != null) {
-				this.runner.stop();
+		public void stop() {
+			synchronized (this.monitor) {
+				if (this.runner != null) {
+					this.runner.stop();
+				}
+				this.runner = null;
 			}
-			this.runner = null;
 		}
 
 		@Override
 		protected synchronized ExitStatus run(OptionSet options) throws Exception {
+			synchronized (this.monitor) {
+				if (this.runner != null) {
+					throw new RuntimeException(
+							"Already running. Please stop the current application before running another (use the 'stop' command).");
+				}
 
-			if (this.runner != null) {
-				throw new RuntimeException(
-						"Already running. Please stop the current application before running another (use the 'stop' command).");
+				SourceOptions sourceOptions = new SourceOptions(options);
+
+				List<RepositoryConfiguration> repositoryConfiguration = RepositoryConfigurationFactory
+						.createDefaultRepositoryConfiguration();
+				repositoryConfiguration.add(0, new RepositoryConfiguration("local",
+						new File("repository").toURI(), true));
+
+				SpringApplicationRunnerConfiguration configuration = new SpringApplicationRunnerConfigurationAdapter(
+						options, this, repositoryConfiguration);
+
+				this.runner = new SpringApplicationRunner(configuration,
+						sourceOptions.getSourcesArray(), sourceOptions.getArgsArray());
+				this.runner.compileAndRun();
+
+				return ExitStatus.OK;
 			}
-
-			SourceOptions sourceOptions = new SourceOptions(options);
-
-			List<RepositoryConfiguration> repositoryConfiguration = RepositoryConfigurationFactory
-					.createDefaultRepositoryConfiguration();
-			repositoryConfiguration.add(0, new RepositoryConfiguration("local",
-					new File("repository").toURI(), true));
-
-			SpringApplicationRunnerConfiguration configuration = new SpringApplicationRunnerConfigurationAdapter(
-					options, this, repositoryConfiguration);
-
-			this.runner = new SpringApplicationRunner(configuration,
-					sourceOptions.getSourcesArray(), sourceOptions.getArgsArray());
-			this.runner.compileAndRun();
-
-			return ExitStatus.OK;
 		}
 
 		/**
@@ -135,7 +140,7 @@ public class RunCommand extends OptionParsingCommand {
 
 			@Override
 			public Level getLogLevel() {
-				if (getOptions().has(RunOptionHandler.this.quietOption)) {
+				if (isQuiet()) {
 					return Level.OFF;
 				}
 				if (getOptions().has(RunOptionHandler.this.verboseOption)) {
@@ -143,7 +148,14 @@ public class RunCommand extends OptionParsingCommand {
 				}
 				return Level.INFO;
 			}
+
+			@Override
+			public boolean isQuiet() {
+				return getOptions().has(RunOptionHandler.this.quietOption);
+			}
+
 		}
+
 	}
 
 }

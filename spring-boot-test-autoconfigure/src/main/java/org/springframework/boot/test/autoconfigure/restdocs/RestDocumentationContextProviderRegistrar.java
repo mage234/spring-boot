@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package org.springframework.boot.test.autoconfigure.restdocs;
 
 import java.util.Map;
 
-import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
@@ -30,32 +29,23 @@ import org.springframework.util.StringUtils;
  * {@link ImportBeanDefinitionRegistrar} used by {@link AutoConfigureRestDocs}.
  *
  * @author Andy Wilkinson
+ * @see AutoConfigureRestDocs
  */
 class RestDocumentationContextProviderRegistrar implements ImportBeanDefinitionRegistrar {
 
 	@Override
 	public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata,
 			BeanDefinitionRegistry registry) {
-		AbstractBeanDefinition beanDefinition = BeanDefinitionBuilder
-				.genericBeanDefinition(ManualRestDocumentation.class)
-				.addConstructorArgValue(determineOutputDir(importingClassMetadata))
-				.getBeanDefinition();
-		registry.registerBeanDefinition(ManualRestDocumentation.class.getName(),
-				beanDefinition);
-	}
-
-	private String determineOutputDir(AnnotationMetadata annotationMetadata) {
-		Map<String, Object> annotationAttributes = annotationMetadata
+		Map<String, Object> annotationAttributes = importingClassMetadata
 				.getAnnotationAttributes(AutoConfigureRestDocs.class.getName());
+		BeanDefinitionBuilder definitionBuilder = BeanDefinitionBuilder
+				.genericBeanDefinition(ManualRestDocumentation.class);
 		String outputDir = (String) annotationAttributes.get("outputDir");
-		if (!StringUtils.hasText(outputDir)) {
-			outputDir = (String) annotationAttributes.get("value");
-			if (!StringUtils.hasText(outputDir)) {
-				throw new IllegalStateException(
-						"Either value or outputDir must be specified on @AutoConfigureRestDocs");
-			}
+		if (StringUtils.hasText(outputDir)) {
+			definitionBuilder.addConstructorArgValue(outputDir);
 		}
-		return outputDir;
+		registry.registerBeanDefinition(ManualRestDocumentation.class.getName(),
+				definitionBuilder.getBeanDefinition());
 	}
 
 }

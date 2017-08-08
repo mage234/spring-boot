@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import java.net.URLClassLoader;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.zip.ZipOutputStream;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -73,12 +74,20 @@ public class ChangeableUrlsTests {
 
 	@Test
 	public void urlsFromJarClassPathAreConsidered() throws Exception {
-		URL projectCore = makeUrl("project-core");
-		URL projectWeb = makeUrl("project-web");
-		ChangeableUrls urls = ChangeableUrls.fromUrlClassLoader(new URLClassLoader(
-				new URL[] { makeJarFileWithUrlsInManifestClassPath(projectCore,
-						projectWeb) }));
-		assertThat(urls.toList()).containsExactly(projectCore, projectWeb);
+		File relative = this.temporaryFolder.newFolder();
+		File jarWithClassPath = makeJarFileWithUrlsInManifestClassPath(
+				"project-core/target/classes/", "project-web/target/classes/",
+				"does-not-exist/target/classes", relative.getName() + "/");
+		new File(jarWithClassPath.getParentFile(), "project-core/target/classes")
+				.mkdirs();
+		new File(jarWithClassPath.getParentFile(), "project-web/target/classes").mkdirs();
+		ChangeableUrls urls = ChangeableUrls
+				.fromUrlClassLoader(new URLClassLoader(new URL[] {
+						jarWithClassPath.toURI().toURL(), makeJarFileWithNoManifest() }));
+		assertThat(urls.toList()).containsExactly(
+				new URL(jarWithClassPath.toURI().toURL(), "project-core/target/classes/"),
+				new URL(jarWithClassPath.toURI().toURL(), "project-web/target/classes/"),
+				relative.toURI().toURL());
 	}
 
 	private URL makeUrl(String name) throws IOException {
@@ -90,7 +99,7 @@ public class ChangeableUrlsTests {
 		return file.toURI().toURL();
 	}
 
-	private URL makeJarFileWithUrlsInManifestClassPath(URL... urls) throws Exception {
+	private File makeJarFileWithUrlsInManifestClassPath(Object... urls) throws Exception {
 		File classpathJar = this.temporaryFolder.newFile("classpath.jar");
 		Manifest manifest = new Manifest();
 		manifest.getMainAttributes().putValue(Attributes.Name.MANIFEST_VERSION.toString(),
@@ -98,6 +107,12 @@ public class ChangeableUrlsTests {
 		manifest.getMainAttributes().putValue(Attributes.Name.CLASS_PATH.toString(),
 				StringUtils.arrayToDelimitedString(urls, " "));
 		new JarOutputStream(new FileOutputStream(classpathJar), manifest).close();
+		return classpathJar;
+	}
+
+	private URL makeJarFileWithNoManifest() throws Exception {
+		File classpathJar = this.temporaryFolder.newFile("no-manifest.jar");
+		new ZipOutputStream(new FileOutputStream(classpathJar)).close();
 		return classpathJar.toURI().toURL();
 	}
 

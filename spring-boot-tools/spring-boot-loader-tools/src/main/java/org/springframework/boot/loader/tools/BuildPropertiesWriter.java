@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,12 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Properties;
 
 /**
- * A {@code BuildPropertiesWriter} writes the {@code build.properties} for consumption by
- * the Actuator.
+ * A {@code BuildPropertiesWriter} writes the {@code build-info.properties} for
+ * consumption by the Actuator.
  *
  * @author Andy Wilkinson
  * @author Stephane Nicoll
@@ -38,7 +39,6 @@ public final class BuildPropertiesWriter {
 	/**
 	 * Creates a new {@code BuildPropertiesWriter} that will write to the given
 	 * {@code outputFile}.
-	 *
 	 * @param outputFile the output file
 	 */
 	public BuildPropertiesWriter(File outputFile) {
@@ -48,17 +48,8 @@ public final class BuildPropertiesWriter {
 	public void writeBuildProperties(ProjectDetails projectDetails) throws IOException {
 		Properties properties = createBuildInfo(projectDetails);
 		createFileIfNecessary(this.outputFile);
-		FileOutputStream outputStream = new FileOutputStream(this.outputFile);
-		try {
+		try (FileOutputStream outputStream = new FileOutputStream(this.outputFile)) {
 			properties.store(outputStream, "Properties");
-		}
-		finally {
-			try {
-				outputStream.close();
-			}
-			catch (IOException ex) {
-				// Continue
-			}
 		}
 	}
 
@@ -119,7 +110,19 @@ public final class BuildPropertiesWriter {
 			this.artifact = artifact;
 			this.name = name;
 			this.version = version;
+			validateAdditionalProperties(additionalProperties);
 			this.additionalProperties = additionalProperties;
+		}
+
+		private static void validateAdditionalProperties(
+				Map<String, String> additionalProperties) {
+			if (additionalProperties != null) {
+				for (Entry<String, String> property : additionalProperties.entrySet()) {
+					if (property.getValue() == null) {
+						throw new NullAdditionalPropertyValueException(property.getKey());
+					}
+				}
+			}
 		}
 
 		public String getGroup() {
@@ -143,4 +146,17 @@ public final class BuildPropertiesWriter {
 		}
 
 	}
+
+	/**
+	 * Exception thrown when an additional property with a null value is encountered.
+	 */
+	public static class NullAdditionalPropertyValueException
+			extends IllegalArgumentException {
+
+		public NullAdditionalPropertyValueException(String name) {
+			super("Additional property '" + name + "' is illegal as its value is null");
+		}
+
+	}
+
 }

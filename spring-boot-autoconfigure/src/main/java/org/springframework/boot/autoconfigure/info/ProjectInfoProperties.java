@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import org.springframework.core.io.Resource;
  * @author Stephane Nicoll
  * @since 1.4.0
  */
-@ConfigurationProperties("spring.info")
+@ConfigurationProperties(prefix = "spring.info")
 public class ProjectInfoProperties {
 
 	private final Build build = new Build();
@@ -59,10 +59,10 @@ public class ProjectInfoProperties {
 	public static class Build {
 
 		/**
-		 * Location of the generated build.properties file.
+		 * Location of the generated build-info.properties file.
 		 */
 		private Resource location = new ClassPathResource(
-				"META-INF/boot/build.properties");
+				"META-INF/build-info.properties");
 
 		public Resource getLocation() {
 			return this.location;

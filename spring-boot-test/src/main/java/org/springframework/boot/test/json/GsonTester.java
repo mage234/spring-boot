@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import org.springframework.util.Assert;
  *     }
  *
  *     &#064;Test
- *     public void testWriteJson() {
+ *     public void testWriteJson() throws IOException {
  *         ExampleObject object = //...
  *         assertThat(json.write(object)).isEqualToJson("expected.json");
  *     }
@@ -49,13 +49,22 @@ import org.springframework.util.Assert;
  *
  * See {@link AbstractJsonMarshalTester} for more details.
  *
- * @param <T> The type under test
+ * @param <T> the type under test
  * @author Phillip Webb
  * @since 1.4.0
  */
 public class GsonTester<T> extends AbstractJsonMarshalTester<T> {
 
 	private final Gson gson;
+
+	/**
+	 * Create a new uninitialized {@link GsonTester} instance.
+	 * @param gson the Gson instance
+	 */
+	protected GsonTester(Gson gson) {
+		Assert.notNull(gson, "Gson must not be null");
+		this.gson = gson;
+	}
 
 	/**
 	 * Create a new {@link GsonTester} instance.
@@ -81,7 +90,7 @@ public class GsonTester<T> extends AbstractJsonMarshalTester<T> {
 	}
 
 	/**
-	 * Utility method to initialize {@link JacksonTester} fields. See {@link JacksonTester
+	 * Utility method to initialize {@link GsonTester} fields. See {@link GsonTester
 	 * class-level documentation} for example usage.
 	 * @param testInstance the test instance
 	 * @param gson the Gson instance
@@ -91,7 +100,7 @@ public class GsonTester<T> extends AbstractJsonMarshalTester<T> {
 	}
 
 	/**
-	 * Utility method to initialize {@link JacksonTester} fields. See {@link JacksonTester
+	 * Utility method to initialize {@link GsonTester} fields. See {@link GsonTester
 	 * class-level documentation} for example usage.
 	 * @param testInstance the test instance
 	 * @param gson an object factory to create the Gson instance
@@ -101,7 +110,7 @@ public class GsonTester<T> extends AbstractJsonMarshalTester<T> {
 	}
 
 	/**
-	 * {@link JsonTesterFieldInitializer} for Gson.
+	 * {@link FieldInitializer} for Gson.
 	 */
 	private static class GsonFieldInitializer extends FieldInitializer<Gson> {
 
@@ -112,8 +121,9 @@ public class GsonTester<T> extends AbstractJsonMarshalTester<T> {
 		@Override
 		protected AbstractJsonMarshalTester<Object> createTester(
 				Class<?> resourceLoadClass, ResolvableType type, Gson marshaller) {
-			return new GsonTester<Object>(resourceLoadClass, type, marshaller);
+			return new GsonTester<>(resourceLoadClass, type, marshaller);
 		}
 
 	}
+
 }

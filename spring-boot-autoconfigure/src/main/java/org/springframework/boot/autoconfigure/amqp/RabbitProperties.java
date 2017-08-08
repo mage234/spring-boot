@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@
 
 package org.springframework.boot.autoconfigure.amqp;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory.CacheMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.NestedConfigurationProperty;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -89,6 +89,11 @@ public class RabbitProperties {
 	private boolean publisherReturns;
 
 	/**
+	 * Connection timeout, in milliseconds; zero for infinite.
+	 */
+	private Integer connectionTimeout;
+
+	/**
 	 * Cache configuration.
 	 */
 	private final Cache cache = new Cache();
@@ -100,15 +105,24 @@ public class RabbitProperties {
 
 	private final Template template = new Template();
 
+	private List<Address> parsedAddresses;
+
 	public String getHost() {
-		if (this.addresses == null) {
-			return this.host;
+		return this.host;
+	}
+
+	/**
+	 * Returns the host from the first address, or the configured host if no addresses
+	 * have been set.
+	 * @return the host
+	 * @see #setAddresses(String)
+	 * @see #getHost()
+	 */
+	public String determineHost() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return getHost();
 		}
-		String[] hosts = StringUtils.delimitedListToStringArray(this.addresses, ":");
-		if (hosts.length == 2) {
-			return hosts[0];
-		}
-		return null;
+		return this.parsedAddresses.get(0).host;
 	}
 
 	public void setHost(String host) {
@@ -116,62 +130,78 @@ public class RabbitProperties {
 	}
 
 	public int getPort() {
-		if (this.addresses == null) {
-			return this.port;
-		}
-		String[] hosts = StringUtils.delimitedListToStringArray(this.addresses, ":");
-		if (hosts.length >= 2) {
-			return Integer
-					.valueOf(StringUtils.commaDelimitedListToStringArray(hosts[1])[0]);
-		}
 		return this.port;
 	}
 
-	public void setAddresses(String addresses) {
-		this.addresses = parseAddresses(addresses);
-	}
-
-	public String getAddresses() {
-		return (this.addresses == null ? this.host + ":" + this.port : this.addresses);
-	}
-
-	private String parseAddresses(String addresses) {
-		Set<String> result = new LinkedHashSet<String>();
-		for (String address : StringUtils.commaDelimitedListToStringArray(addresses)) {
-			address = address.trim();
-			if (address.startsWith("amqp://")) {
-				address = address.substring("amqp://".length());
-			}
-			if (address.contains("@")) {
-				String[] split = StringUtils.split(address, "@");
-				String creds = split[0];
-				address = split[1];
-				split = StringUtils.split(creds, ":");
-				this.username = split[0];
-				if (split.length > 0) {
-					this.password = split[1];
-				}
-			}
-			int index = address.indexOf("/");
-			if (index >= 0 && index < address.length()) {
-				setVirtualHost(address.substring(index + 1));
-				address = address.substring(0, index);
-			}
-			if (!address.contains(":")) {
-				address = address + ":" + this.port;
-			}
-			result.add(address);
+	/**
+	 * Returns the port from the first address, or the configured port if no addresses
+	 * have been set.
+	 * @return the port
+	 * @see #setAddresses(String)
+	 * @see #getPort()
+	 */
+	public int determinePort() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return getPort();
 		}
-		return (result.isEmpty() ? null
-				: StringUtils.collectionToCommaDelimitedString(result));
+		Address address = this.parsedAddresses.get(0);
+		return address.port;
 	}
 
 	public void setPort(int port) {
 		this.port = port;
 	}
 
+	public String getAddresses() {
+		return this.addresses;
+	}
+
+	/**
+	 * Returns the comma-separated addresses or a single address ({@code host:port})
+	 * created from the configured host and port if no addresses have been set.
+	 * @return the addresses
+	 */
+	public String determineAddresses() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return this.host + ":" + this.port;
+		}
+		List<String> addressStrings = new ArrayList<>();
+		for (Address parsedAddress : this.parsedAddresses) {
+			addressStrings.add(parsedAddress.host + ":" + parsedAddress.port);
+		}
+		return StringUtils.collectionToCommaDelimitedString(addressStrings);
+	}
+
+	public void setAddresses(String addresses) {
+		this.addresses = addresses;
+		this.parsedAddresses = parseAddresses(addresses);
+	}
+
+	private List<Address> parseAddresses(String addresses) {
+		List<Address> parsedAddresses = new ArrayList<>();
+		for (String address : StringUtils.commaDelimitedListToStringArray(addresses)) {
+			parsedAddresses.add(new Address(address));
+		}
+		return parsedAddresses;
+	}
+
 	public String getUsername() {
 		return this.username;
+	}
+
+	/**
+	 * If addresses have been set and the first address has a username it is returned.
+	 * Otherwise returns the result of calling {@code getUsername()}.
+	 * @return the username
+	 * @see #setAddresses(String)
+	 * @see #getUsername()
+	 */
+	public String determineUsername() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return this.username;
+		}
+		Address address = this.parsedAddresses.get(0);
+		return address.username == null ? this.username : address.username;
 	}
 
 	public void setUsername(String username) {
@@ -180,6 +210,21 @@ public class RabbitProperties {
 
 	public String getPassword() {
 		return this.password;
+	}
+
+	/**
+	 * If addresses have been set and the first address has a password it is returned.
+	 * Otherwise returns the result of calling {@code getPassword()}.
+	 * @return the password or {@code null}
+	 * @see #setAddresses(String)
+	 * @see #getPassword()
+	 */
+	public String determinePassword() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return getPassword();
+		}
+		Address address = this.parsedAddresses.get(0);
+		return address.password == null ? getPassword() : address.password;
 	}
 
 	public void setPassword(String password) {
@@ -192,6 +237,21 @@ public class RabbitProperties {
 
 	public String getVirtualHost() {
 		return this.virtualHost;
+	}
+
+	/**
+	 * If addresses have been set and the first address has a virtual host it is returned.
+	 * Otherwise returns the result of calling {@code getVirtualHost()}.
+	 * @return the virtual host or {@code null}
+	 * @see #setAddresses(String)
+	 * @see #getVirtualHost()
+	 */
+	public String determineVirtualHost() {
+		if (CollectionUtils.isEmpty(this.parsedAddresses)) {
+			return getVirtualHost();
+		}
+		Address address = this.parsedAddresses.get(0);
+		return address.virtualHost == null ? getVirtualHost() : address.virtualHost;
 	}
 
 	public void setVirtualHost(String virtualHost) {
@@ -220,6 +280,14 @@ public class RabbitProperties {
 
 	public void setPublisherReturns(boolean publisherReturns) {
 		this.publisherReturns = publisherReturns;
+	}
+
+	public Integer getConnectionTimeout() {
+		return this.connectionTimeout;
+	}
+
+	public void setConnectionTimeout(Integer connectionTimeout) {
+		this.connectionTimeout = connectionTimeout;
 	}
 
 	public Cache getCache() {
@@ -261,6 +329,12 @@ public class RabbitProperties {
 		 */
 		private String trustStorePassword;
 
+		/**
+		 * SSL algorithm to use (e.g. TLSv1.1). Default is set automatically by the rabbit
+		 * client library.
+		 */
+		private String algorithm;
+
 		public boolean isEnabled() {
 			return this.enabled;
 		}
@@ -299,6 +373,14 @@ public class RabbitProperties {
 
 		public void setTrustStorePassword(String trustStorePassword) {
 			this.trustStorePassword = trustStorePassword;
+		}
+
+		public String getAlgorithm() {
+			return this.algorithm;
+		}
+
+		public void setAlgorithm(String sslAlgorithm) {
+			this.algorithm = sslAlgorithm;
 		}
 
 	}
@@ -381,7 +463,51 @@ public class RabbitProperties {
 
 	}
 
+	public enum ContainerType {
+
+		/**
+		 * Container where the RabbitMQ consumer dispatches messages to an invoker thread.
+		 */
+		SIMPLE,
+
+		/**
+		 * Container where the listener is invoked directly on the RabbitMQ consumer
+		 * thread.
+		 */
+		DIRECT
+
+	}
+
 	public static class Listener {
+
+		/**
+		 * Listener container type.
+		 */
+		private ContainerType type = ContainerType.SIMPLE;
+
+		private final SimpleContainer simple = new SimpleContainer();
+
+		private final DirectContainer direct = new DirectContainer();
+
+		public ContainerType getType() {
+			return this.type;
+		}
+
+		public void setType(ContainerType containerType) {
+			this.type = containerType;
+		}
+
+		public SimpleContainer getSimple() {
+			return this.simple;
+		}
+
+		public DirectContainer getDirect() {
+			return this.direct;
+		}
+
+	}
+
+	public static abstract class AmqpContainer {
 
 		/**
 		 * Start the container automatically on startup.
@@ -394,26 +520,10 @@ public class RabbitProperties {
 		private AcknowledgeMode acknowledgeMode;
 
 		/**
-		 * Minimum number of consumers.
-		 */
-		private Integer concurrency;
-
-		/**
-		 * Maximum number of consumers.
-		 */
-		private Integer maxConcurrency;
-
-		/**
 		 * Number of messages to be handled in a single request. It should be greater than
 		 * or equal to the transaction size (if used).
 		 */
 		private Integer prefetch;
-
-		/**
-		 * Number of messages to be processed in a transaction. For best results it should
-		 * be less than or equal to the prefetch count.
-		 */
-		private Integer transactionSize;
 
 		/**
 		 * Whether rejected deliveries are requeued by default; default true.
@@ -421,9 +531,13 @@ public class RabbitProperties {
 		private Boolean defaultRequeueRejected;
 
 		/**
+		 * How often idle container events should be published in milliseconds.
+		 */
+		private Long idleEventInterval;
+
+		/**
 		 * Optional properties for a retry interceptor.
 		 */
-		@NestedConfigurationProperty
 		private final ListenerRetry retry = new ListenerRetry();
 
 		public boolean isAutoStartup() {
@@ -442,6 +556,57 @@ public class RabbitProperties {
 			this.acknowledgeMode = acknowledgeMode;
 		}
 
+		public Integer getPrefetch() {
+			return this.prefetch;
+		}
+
+		public void setPrefetch(Integer prefetch) {
+			this.prefetch = prefetch;
+		}
+
+		public Boolean getDefaultRequeueRejected() {
+			return this.defaultRequeueRejected;
+		}
+
+		public void setDefaultRequeueRejected(Boolean defaultRequeueRejected) {
+			this.defaultRequeueRejected = defaultRequeueRejected;
+		}
+
+		public Long getIdleEventInterval() {
+			return this.idleEventInterval;
+		}
+
+		public void setIdleEventInterval(Long idleEventInterval) {
+			this.idleEventInterval = idleEventInterval;
+		}
+
+		public ListenerRetry getRetry() {
+			return this.retry;
+		}
+
+	}
+
+	/**
+	 * Configuration properties for {@code SimpleMessageListenerContainer}.
+	 */
+	public static class SimpleContainer extends AmqpContainer {
+
+		/**
+		 * Minimum number of listener invoker threads.
+		 */
+		private Integer concurrency;
+
+		/**
+		 * Maximum number of listener invoker threads.
+		 */
+		private Integer maxConcurrency;
+
+		/**
+		 * Number of messages to be processed in a transaction; number of messages between
+		 * acks. For best results it should be less than or equal to the prefetch count.
+		 */
+		private Integer transactionSize;
+
 		public Integer getConcurrency() {
 			return this.concurrency;
 		}
@@ -458,14 +623,6 @@ public class RabbitProperties {
 			this.maxConcurrency = maxConcurrency;
 		}
 
-		public Integer getPrefetch() {
-			return this.prefetch;
-		}
-
-		public void setPrefetch(Integer prefetch) {
-			this.prefetch = prefetch;
-		}
-
 		public Integer getTransactionSize() {
 			return this.transactionSize;
 		}
@@ -474,23 +631,30 @@ public class RabbitProperties {
 			this.transactionSize = transactionSize;
 		}
 
-		public Boolean getDefaultRequeueRejected() {
-			return this.defaultRequeueRejected;
+	}
+
+	/**
+	 * Configuration properties for {@code DirectMessageListenerContainer}.
+	 */
+	public static class DirectContainer extends AmqpContainer {
+
+		/**
+		 * Number of consumers per queue.
+		 */
+		private Integer consumersPerQueue;
+
+		public Integer getConsumersPerQueue() {
+			return this.consumersPerQueue;
 		}
 
-		public void setDefaultRequeueRejected(Boolean defaultRequeueRejected) {
-			this.defaultRequeueRejected = defaultRequeueRejected;
-		}
-
-		public ListenerRetry getRetry() {
-			return this.retry;
+		public void setConsumersPerQueue(Integer consumersPerQueue) {
+			this.consumersPerQueue = consumersPerQueue;
 		}
 
 	}
 
 	public static class Template {
 
-		@NestedConfigurationProperty
 		private final Retry retry = new Retry();
 
 		/**
@@ -621,6 +785,77 @@ public class RabbitProperties {
 
 		public void setStateless(boolean stateless) {
 			this.stateless = stateless;
+		}
+
+	}
+
+	private static final class Address {
+
+		private static final String PREFIX_AMQP = "amqp://";
+
+		private static final int DEFAULT_PORT = 5672;
+
+		private String host;
+
+		private int port;
+
+		private String username;
+
+		private String password;
+
+		private String virtualHost;
+
+		private Address(String input) {
+			input = input.trim();
+			input = trimPrefix(input);
+			input = parseUsernameAndPassword(input);
+			input = parseVirtualHost(input);
+			parseHostAndPort(input);
+		}
+
+		private String trimPrefix(String input) {
+			if (input.startsWith(PREFIX_AMQP)) {
+				input = input.substring(PREFIX_AMQP.length());
+			}
+			return input;
+		}
+
+		private String parseUsernameAndPassword(String input) {
+			if (input.contains("@")) {
+				String[] split = StringUtils.split(input, "@");
+				String creds = split[0];
+				input = split[1];
+				split = StringUtils.split(creds, ":");
+				this.username = split[0];
+				if (split.length > 0) {
+					this.password = split[1];
+				}
+			}
+			return input;
+		}
+
+		private String parseVirtualHost(String input) {
+			int hostIndex = input.indexOf("/");
+			if (hostIndex >= 0) {
+				this.virtualHost = input.substring(hostIndex + 1);
+				if (this.virtualHost.isEmpty()) {
+					this.virtualHost = "/";
+				}
+				input = input.substring(0, hostIndex);
+			}
+			return input;
+		}
+
+		private void parseHostAndPort(String input) {
+			int portIndex = input.indexOf(':');
+			if (portIndex == -1) {
+				this.host = input;
+				this.port = DEFAULT_PORT;
+			}
+			else {
+				this.host = input.substring(0, portIndex);
+				this.port = Integer.valueOf(input.substring(portIndex + 1));
+			}
 		}
 
 	}

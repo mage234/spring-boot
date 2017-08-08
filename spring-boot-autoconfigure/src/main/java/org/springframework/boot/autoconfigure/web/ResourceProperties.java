@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import java.util.Collections;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.context.ResourceLoaderAware;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -33,6 +32,7 @@ import org.springframework.core.io.ResourceLoader;
  * @author Phillip Webb
  * @author Brian Clozel
  * @author Dave Syer
+ * @author Venil Noronha
  * @since 1.1.0
  */
 @ConfigurationProperties(prefix = "spring.resources", ignoreUnknownFields = false)
@@ -85,7 +85,16 @@ public class ResourceProperties implements ResourceLoaderAware {
 	}
 
 	public void setStaticLocations(String[] staticLocations) {
-		this.staticLocations = staticLocations;
+		this.staticLocations = appendSlashIfNecessary(staticLocations);
+	}
+
+	private String[] appendSlashIfNecessary(String[] staticLocations) {
+		String[] normalized = new String[staticLocations.length];
+		for (int i = 0; i < staticLocations.length; i++) {
+			String location = staticLocations[i];
+			normalized[i] = (location.endsWith("/") ? location : location + "/");
+		}
+		return normalized;
 	}
 
 	public Resource getWelcomePage() {
@@ -116,11 +125,10 @@ public class ResourceProperties implements ResourceLoaderAware {
 		return result;
 	}
 
-	List<Resource> getFaviconLocations() {
-		List<Resource> locations = new ArrayList<Resource>(
-				CLASSPATH_RESOURCE_LOCATIONS.length + 1);
+	public List<Resource> resolveFaviconLocations() {
+		List<Resource> locations = new ArrayList<>(this.staticLocations.length + 1);
 		if (this.resourceLoader != null) {
-			for (String location : CLASSPATH_RESOURCE_LOCATIONS) {
+			for (String location : this.staticLocations) {
 				locations.add(this.resourceLoader.getResource(location));
 			}
 		}
@@ -171,11 +179,10 @@ public class ResourceProperties implements ResourceLoaderAware {
 
 		/**
 		 * Enable resolution of already gzipped resources. Checks for a resource name
-		 * variant with the {@code *.gz} extension.
+		 * variant with the "*.gz" extension.
 		 */
 		private boolean gzipped = false;
 
-		@NestedConfigurationProperty
 		private final Strategy strategy = new Strategy();
 
 		/**
@@ -185,9 +192,8 @@ public class ResourceProperties implements ResourceLoaderAware {
 		 * settings are present.
 		 */
 		public Boolean getEnabled() {
-			Boolean strategyEnabled = getStrategy().getFixed().isEnabled()
-					|| getStrategy().getContent().isEnabled();
-			return (strategyEnabled ? Boolean.TRUE : this.enabled);
+			return getEnabled(getStrategy().getFixed().isEnabled(),
+					getStrategy().getContent().isEnabled(), this.enabled);
 		}
 
 		public void setEnabled(boolean enabled) {
@@ -222,6 +228,11 @@ public class ResourceProperties implements ResourceLoaderAware {
 			this.gzipped = gzipped;
 		}
 
+		static Boolean getEnabled(boolean fixedEnabled, boolean contentEnabled,
+				Boolean chainEnabled) {
+			return (fixedEnabled || contentEnabled ? Boolean.TRUE : chainEnabled);
+		}
+
 	}
 
 	/**
@@ -229,10 +240,8 @@ public class ResourceProperties implements ResourceLoaderAware {
 	 */
 	public static class Strategy {
 
-		@NestedConfigurationProperty
 		private final Fixed fixed = new Fixed();
 
-		@NestedConfigurationProperty
 		private final Content content = new Content();
 
 		public Fixed getFixed() {
@@ -291,7 +300,7 @@ public class ResourceProperties implements ResourceLoaderAware {
 		/**
 		 * Comma-separated list of patterns to apply to the Version Strategy.
 		 */
-		private String[] paths;
+		private String[] paths = new String[] { "/**" };
 
 		/**
 		 * Version string to use for the Version Strategy.

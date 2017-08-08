@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,13 +43,13 @@ public class HealthEndpoint extends AbstractEndpoint<Health> {
 	private long timeToLive = 1000;
 
 	/**
-	 * Create a new {@link HealthIndicator} instance.
+	 * Create a new {@link HealthEndpoint} instance.
 	 * @param healthAggregator the health aggregator
 	 * @param healthIndicators the health indicators
 	 */
 	public HealthEndpoint(HealthAggregator healthAggregator,
 			Map<String, HealthIndicator> healthIndicators) {
-		super("health", false);
+		super("health");
 		Assert.notNull(healthAggregator, "HealthAggregator must not be null");
 		Assert.notNull(healthIndicators, "HealthIndicators must not be null");
 		CompositeHealthIndicator healthIndicator = new CompositeHealthIndicator(
@@ -69,8 +69,12 @@ public class HealthEndpoint extends AbstractEndpoint<Health> {
 		return this.timeToLive;
 	}
 
-	public void setTimeToLive(long ttl) {
-		this.timeToLive = ttl;
+	/**
+	 * Set the time to live for cached results.
+	 * @param timeToLive the time to live in milliseconds
+	 */
+	public void setTimeToLive(long timeToLive) {
+		this.timeToLive = timeToLive;
 	}
 
 	/**
@@ -93,4 +97,5 @@ public class HealthEndpoint extends AbstractEndpoint<Health> {
 		}
 		return name;
 	}
+
 }

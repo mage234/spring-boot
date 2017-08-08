@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TraceEndpointTests extends AbstractEndpointTests<TraceEndpoint> {
 
 	public TraceEndpointTests() {
-		super(Config.class, TraceEndpoint.class, "trace", true, "endpoints.trace");
+		super(Config.class, TraceEndpoint.class, "trace", "endpoints.trace");
 	}
 
 	@Test
@@ -56,5 +56,7 @@ public class TraceEndpointTests extends AbstractEndpointTests<TraceEndpoint> {
 			repository.add(Collections.<String, Object>singletonMap("a", "b"));
 			return new TraceEndpoint(repository);
 		}
+
 	}
+
 }

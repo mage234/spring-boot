@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.StringUtils;
 
 /**
  * Factory to create an Artemis {@link ActiveMQConnectionFactory} instance from properties
@@ -123,15 +124,21 @@ class ArtemisConnectionFactoryFactory {
 
 	private <T extends ActiveMQConnectionFactory> T createNativeConnectionFactory(
 			Class<T> factoryClass) throws Exception {
-		Map<String, Object> params = new HashMap<String, Object>();
+		Map<String, Object> params = new HashMap<>();
 		params.put(TransportConstants.HOST_PROP_NAME, this.properties.getHost());
 		params.put(TransportConstants.PORT_PROP_NAME, this.properties.getPort());
 		TransportConfiguration transportConfiguration = new TransportConfiguration(
 				NettyConnectorFactory.class.getName(), params);
 		Constructor<T> constructor = factoryClass.getConstructor(boolean.class,
 				TransportConfiguration[].class);
-		return constructor.newInstance(false,
+		T connectionFactory = constructor.newInstance(false,
 				new TransportConfiguration[] { transportConfiguration });
+		String user = this.properties.getUser();
+		if (StringUtils.hasText(user)) {
+			connectionFactory.setUser(user);
+			connectionFactory.setPassword(this.properties.getPassword());
+		}
+		return connectionFactory;
 	}
 
 }

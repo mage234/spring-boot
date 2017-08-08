@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,15 @@ package org.springframework.boot.autoconfigure.condition;
 
 import org.junit.Test;
 
-import org.springframework.boot.test.util.EnvironmentTestUtils;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.boot.test.context.assertj.AssertableApplicationContext;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.runner.ContextConsumer;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,43 +34,44 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests for {@link AnyNestedCondition}.
  *
  * @author Phillip Webb
+ * @author Dave Syer
  */
 public class AnyNestedConditionTests {
 
+	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner();
+
 	@Test
 	public void neither() throws Exception {
-		AnnotationConfigApplicationContext context = load(OnPropertyAorBCondition.class);
-		assertThat(context.containsBean("myBean")).isFalse();
-		context.close();
+		this.contextRunner.withUserConfiguration(Config.class).run(match(false));
 	}
 
 	@Test
 	public void propertyA() throws Exception {
-		AnnotationConfigApplicationContext context = load(Config.class, "a:a");
-		assertThat(context.containsBean("myBean")).isTrue();
-		context.close();
+		this.contextRunner.withUserConfiguration(Config.class).withPropertyValues("a:a")
+				.run(match(true));
 	}
 
 	@Test
 	public void propertyB() throws Exception {
-		AnnotationConfigApplicationContext context = load(Config.class, "b:b");
-		assertThat(context.containsBean("myBean")).isTrue();
-		context.close();
+		this.contextRunner.withUserConfiguration(Config.class).withPropertyValues("b:b")
+				.run(match(true));
 	}
 
 	@Test
 	public void both() throws Exception {
-		AnnotationConfigApplicationContext context = load(Config.class, "a:a", "b:b");
-		assertThat(context.containsBean("myBean")).isTrue();
-		context.close();
+		this.contextRunner.withUserConfiguration(Config.class)
+				.withPropertyValues("a:a", "b:b").run(match(true));
 	}
 
-	private AnnotationConfigApplicationContext load(Class<?> config, String... env) {
-		AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
-		EnvironmentTestUtils.addEnvironment(context, env);
-		context.register(config);
-		context.refresh();
-		return context;
+	private ContextConsumer<AssertableApplicationContext> match(boolean expected) {
+		return (context) -> {
+			if (expected) {
+				assertThat(context).hasBean("myBean");
+			}
+			else {
+				assertThat(context).doesNotHaveBean("myBean");
+			}
+		};
 	}
 
 	@Configuration
@@ -91,9 +96,24 @@ public class AnyNestedConditionTests {
 
 		}
 
+		@ConditionalOnExpression("true")
 		@ConditionalOnProperty("b")
 		static class HasPropertyB {
 
+		}
+
+		@Conditional(NonSpringBootCondition.class)
+		static class SubclassC {
+
+		}
+
+	}
+
+	static class NonSpringBootCondition implements Condition {
+
+		@Override
+		public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+			return false;
 		}
 
 	}

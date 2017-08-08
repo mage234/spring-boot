@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,11 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletRegistration;
 import javax.ws.rs.ApplicationPath;
 import javax.ws.rs.ext.ContextResolver;
-import javax.ws.rs.ext.Provider;
 
+import com.fasterxml.jackson.databind.AnnotationIntrospector;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.MapperConfig;
+import com.fasterxml.jackson.module.jaxb.JaxbAnnotationIntrospector;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.glassfish.jersey.CommonProperties;
@@ -40,7 +42,6 @@ import org.glassfish.jersey.servlet.ServletContainer;
 import org.glassfish.jersey.servlet.ServletProperties;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.AutoConfigureOrder;
@@ -51,12 +52,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.DispatcherServletAutoConfiguration;
-import org.springframework.boot.context.embedded.FilterRegistrationBean;
-import org.springframework.boot.context.embedded.RegistrationBean;
-import org.springframework.boot.context.embedded.ServletRegistrationBean;
+import org.springframework.boot.autoconfigure.web.servlet.DispatcherServletAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.web.servlet.RegistrationBean;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -81,7 +83,7 @@ import org.springframework.web.filter.RequestContextFilter;
 @ConditionalOnClass(name = { "org.glassfish.jersey.server.spring.SpringComponentProvider",
 		"javax.servlet.ServletRegistration" })
 @ConditionalOnBean(type = "org.glassfish.jersey.server.ResourceConfig")
-@ConditionalOnWebApplication
+@ConditionalOnWebApplication(type = Type.SERVLET)
 @AutoConfigureOrder(Ordered.HIGHEST_PRECEDENCE)
 @AutoConfigureBefore(DispatcherServletAutoConfiguration.class)
 @AutoConfigureAfter(JacksonAutoConfiguration.class)
@@ -99,10 +101,10 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 	private String path;
 
 	public JerseyAutoConfiguration(JerseyProperties jersey, ResourceConfig config,
-			ObjectProvider<List<ResourceConfigCustomizer>> customizersProvider) {
+			ObjectProvider<List<ResourceConfigCustomizer>> customizers) {
 		this.jersey = jersey;
 		this.config = config;
-		this.customizers = customizersProvider.getIfAvailable();
+		this.customizers = customizers.getIfAvailable();
 	}
 
 	@PostConstruct
@@ -132,8 +134,8 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 
 	@Bean
 	@ConditionalOnMissingBean
-	public FilterRegistrationBean requestContextFilter() {
-		FilterRegistrationBean registration = new FilterRegistrationBean();
+	public FilterRegistrationBean<RequestContextFilter> requestContextFilter() {
+		FilterRegistrationBean<RequestContextFilter> registration = new FilterRegistrationBean<>();
 		registration.setFilter(new RequestContextFilter());
 		registration.setOrder(this.jersey.getFilter().getOrder() - 1);
 		registration.setName("requestContextFilter");
@@ -143,8 +145,8 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 	@Bean
 	@ConditionalOnMissingBean(name = "jerseyFilterRegistration")
 	@ConditionalOnProperty(prefix = "spring.jersey", name = "type", havingValue = "filter")
-	public FilterRegistrationBean jerseyFilterRegistration() {
-		FilterRegistrationBean registration = new FilterRegistrationBean();
+	public FilterRegistrationBean<ServletContainer> jerseyFilterRegistration() {
+		FilterRegistrationBean<ServletContainer> registration = new FilterRegistrationBean<>();
 		registration.setFilter(new ServletContainer(this.config));
 		registration.setUrlPatterns(Arrays.asList(this.path));
 		registration.setOrder(this.jersey.getFilter().getOrder());
@@ -166,8 +168,8 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 	@Bean
 	@ConditionalOnMissingBean(name = "jerseyServletRegistration")
 	@ConditionalOnProperty(prefix = "spring.jersey", name = "type", havingValue = "servlet", matchIfMissing = true)
-	public ServletRegistrationBean jerseyServletRegistration() {
-		ServletRegistrationBean registration = new ServletRegistrationBean(
+	public ServletRegistrationBean<ServletContainer> jerseyServletRegistration() {
+		ServletRegistrationBean<ServletContainer> registration = new ServletRegistrationBean<>(
 				new ServletContainer(this.config), this.path);
 		addInitParameters(registration);
 		registration.setName(getServletRegistrationName());
@@ -227,6 +229,7 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 			// will try and register a ContextLoaderListener which we don't need
 			servletContext.setInitParameter("contextConfigLocation", "<NONE>");
 		}
+
 	}
 
 	@ConditionalOnClass(JacksonFeature.class)
@@ -234,23 +237,54 @@ public class JerseyAutoConfiguration implements ServletContextAware {
 	@Configuration
 	static class JacksonResourceConfigCustomizer {
 
+		private static final String JAXB_ANNOTATION_INTROSPECTOR_CLASS_NAME = "com.fasterxml.jackson.module.jaxb.JaxbAnnotationIntrospector";
+
 		@Bean
-		public ResourceConfigCustomizer resourceConfigCustomizer() {
-			return new ResourceConfigCustomizer() {
-				@Override
-				public void customize(ResourceConfig config) {
-					config.register(JacksonFeature.class);
-					config.register(ObjectMapperContextResolver.class);
-				}
+		public ResourceConfigCustomizer resourceConfigCustomizer(
+				final ObjectMapper objectMapper) {
+			addJaxbAnnotationIntrospectorIfPresent(objectMapper);
+			return (ResourceConfig config) -> {
+				config.register(JacksonFeature.class);
+				config.register(new ObjectMapperContextResolver(objectMapper),
+						ContextResolver.class);
 			};
 		}
 
-		@Provider
-		static class ObjectMapperContextResolver
+		private void addJaxbAnnotationIntrospectorIfPresent(ObjectMapper objectMapper) {
+			if (ClassUtils.isPresent(JAXB_ANNOTATION_INTROSPECTOR_CLASS_NAME,
+					getClass().getClassLoader())) {
+				new ObjectMapperCustomizer().addJaxbAnnotationIntrospector(objectMapper);
+			}
+		}
+
+		private static final class ObjectMapperCustomizer {
+
+			private void addJaxbAnnotationIntrospector(ObjectMapper objectMapper) {
+				JaxbAnnotationIntrospector jaxbAnnotationIntrospector = new JaxbAnnotationIntrospector(
+						objectMapper.getTypeFactory());
+				objectMapper.setAnnotationIntrospectors(
+						createPair(objectMapper.getSerializationConfig(),
+								jaxbAnnotationIntrospector),
+						createPair(objectMapper.getDeserializationConfig(),
+								jaxbAnnotationIntrospector));
+			}
+
+			private AnnotationIntrospector createPair(MapperConfig<?> config,
+					JaxbAnnotationIntrospector jaxbAnnotationIntrospector) {
+				return AnnotationIntrospector.pair(config.getAnnotationIntrospector(),
+						jaxbAnnotationIntrospector);
+			}
+
+		}
+
+		private static final class ObjectMapperContextResolver
 				implements ContextResolver<ObjectMapper> {
 
-			@Autowired
-			private ObjectMapper objectMapper;
+			private final ObjectMapper objectMapper;
+
+			private ObjectMapperContextResolver(ObjectMapper objectMapper) {
+				this.objectMapper = objectMapper;
+			}
 
 			@Override
 			public ObjectMapper getContext(Class<?> type) {

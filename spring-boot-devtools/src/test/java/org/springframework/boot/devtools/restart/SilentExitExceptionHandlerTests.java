@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 package org.springframework.boot.devtools.restart;
 
+import java.util.concurrent.CountDownLatch;
+
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +27,7 @@ import static org.junit.Assert.fail;
  * Tests for {@link SilentExitExceptionHandler}.
  *
  * @author Phillip Webb
+ * @author Andy Wilkinson
  */
 public class SilentExitExceptionHandlerTests {
 
@@ -43,7 +46,7 @@ public class SilentExitExceptionHandlerTests {
 	}
 
 	@Test
-	public void doesntInterferWithOtherExceptions() throws Exception {
+	public void doesntInterfereWithOtherExceptions() throws Exception {
 		TestThread testThread = new TestThread() {
 			@Override
 			public void run() {
@@ -55,17 +58,31 @@ public class SilentExitExceptionHandlerTests {
 		assertThat(testThread.getThrown().getMessage()).isEqualTo("Expected");
 	}
 
+	@Test
+	public void preventsNonZeroExitCodeWhenAllOtherThreadsAreDaemonThreads() {
+		try {
+			SilentExitExceptionHandler.exitCurrentThread();
+		}
+		catch (Exception ex) {
+			TestSilentExitExceptionHandler silentExitExceptionHandler = new TestSilentExitExceptionHandler();
+			silentExitExceptionHandler.uncaughtException(Thread.currentThread(), ex);
+			try {
+				assertThat(silentExitExceptionHandler.nonZeroExitCodePrevented).isTrue();
+			}
+			finally {
+				silentExitExceptionHandler.cleanUp();
+			}
+		}
+
+	}
+
 	private static abstract class TestThread extends Thread {
 
 		private Throwable thrown;
 
 		TestThread() {
-			setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
-				@Override
-				public void uncaughtException(Thread t, Throwable e) {
-					TestThread.this.thrown = e;
-				}
-			});
+			setUncaughtExceptionHandler(
+					(thread, exception) -> TestThread.this.thrown = exception);
 		}
 
 		public Throwable getThrown() {
@@ -75,6 +92,55 @@ public class SilentExitExceptionHandlerTests {
 		public void startAndJoin() throws InterruptedException {
 			start();
 			join();
+		}
+
+	}
+
+	private static class TestSilentExitExceptionHandler
+			extends SilentExitExceptionHandler {
+
+		private boolean nonZeroExitCodePrevented;
+
+		private final Object monitor = new Object();
+
+		TestSilentExitExceptionHandler() {
+			super(null);
+		}
+
+		@Override
+		protected void preventNonZeroExitCode() {
+			this.nonZeroExitCodePrevented = true;
+		}
+
+		@Override
+		protected Thread[] getAllThreads() {
+			final CountDownLatch threadRunning = new CountDownLatch(1);
+			Thread daemonThread = new Thread(() -> {
+				synchronized (TestSilentExitExceptionHandler.this.monitor) {
+					threadRunning.countDown();
+					try {
+						TestSilentExitExceptionHandler.this.monitor.wait();
+					}
+					catch (InterruptedException ex) {
+						Thread.currentThread().interrupt();
+					}
+				}
+			});
+			daemonThread.setDaemon(true);
+			daemonThread.start();
+			try {
+				threadRunning.await();
+			}
+			catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+			return new Thread[] { Thread.currentThread(), daemonThread };
+		}
+
+		private void cleanUp() {
+			synchronized (this.monitor) {
+				this.monitor.notifyAll();
+			}
 		}
 
 	}

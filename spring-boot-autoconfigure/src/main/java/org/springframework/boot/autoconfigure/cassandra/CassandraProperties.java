@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @author Julien Dubois
  * @author Phillip Webb
+ * @author Mark Paluch
+ * @author Stephane Nicoll
  * @since 1.3.0
  */
 @ConfigurationProperties(prefix = "spring.data.cassandra")
@@ -113,9 +115,19 @@ public class CassandraProperties {
 	private int readTimeoutMillis = SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
 
 	/**
+	 * Schema action to take at startup.
+	 */
+	private String schemaAction = "none";
+
+	/**
 	 * Enable SSL support.
 	 */
 	private boolean ssl = false;
+
+	/**
+	 * Pool configuration.
+	 */
+	private final Pool pool = new Pool();
 
 	public String getKeyspaceName() {
 		return this.keyspaceName;
@@ -245,6 +257,79 @@ public class CassandraProperties {
 
 	public void setSsl(boolean ssl) {
 		this.ssl = ssl;
+	}
+
+	public String getSchemaAction() {
+		return this.schemaAction;
+	}
+
+	public void setSchemaAction(String schemaAction) {
+		this.schemaAction = schemaAction;
+	}
+
+	public Pool getPool() {
+		return this.pool;
+	}
+
+	/**
+	 * Pool properties.
+	 */
+	public static class Pool {
+
+		/**
+		 * Idle timeout (in seconds) before an idle connection is removed.
+		 */
+		private int idleTimeout = 120;
+
+		/**
+		 * Pool timeout (in milliseconds) when trying to acquire a connection from a
+		 * host's pool.
+		 */
+		private int poolTimeout = 5000;
+
+		/**
+		 * Heartbeat interval (in seconds) after which a message is sent on an idle
+		 * connection to make sure it's still alive.
+		 */
+		private int heartbeatInterval = 30;
+
+		/**
+		 * Maximum number of requests that get enqueued if no connection is available.
+		 */
+		private int maxQueueSize = 256;
+
+		public int getIdleTimeout() {
+			return this.idleTimeout;
+		}
+
+		public void setIdleTimeout(int idleTimeout) {
+			this.idleTimeout = idleTimeout;
+		}
+
+		public int getPoolTimeout() {
+			return this.poolTimeout;
+		}
+
+		public void setPoolTimeout(int poolTimeout) {
+			this.poolTimeout = poolTimeout;
+		}
+
+		public int getHeartbeatInterval() {
+			return this.heartbeatInterval;
+		}
+
+		public void setHeartbeatInterval(int heartbeatInterval) {
+			this.heartbeatInterval = heartbeatInterval;
+		}
+
+		public int getMaxQueueSize() {
+			return this.maxQueueSize;
+		}
+
+		public void setMaxQueueSize(int maxQueueSize) {
+			this.maxQueueSize = maxQueueSize;
+		}
+
 	}
 
 }
